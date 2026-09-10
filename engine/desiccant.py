@@ -61,7 +61,7 @@ class DesiccantType:
     q_max_slope_per_k
         Fractional loss of q_max per kelvin above 25 degC. 0.005 means 0.5 %
         per K, i.e. 17.5 % less capacity at 60 degC. Linear over the cavity
-        range; clamped so q_max never falls below a quarter of q_max_25.
+        range; clamped to [0.25, 1.0] x q_max_25 (no bonus below 25 degC).
     k_25
         Langmuir affinity at 25 degC, per unit RH (RH as a fraction).
         Higher means the curve rises faster at low RH.
@@ -87,7 +87,9 @@ class DesiccantType:
     def q_max(self, t_c: float) -> float:
         """Saturation loading at temperature, kg/kg."""
         factor = 1.0 - self.q_max_slope_per_k * (t_c - 25.0)
-        return self.q_max_25 * max(0.25, min(1.15, factor))
+        # No credit for cold: real 3A gains only a few percent below 25 degC
+        # and leaving it out keeps every lifetime number conservative.
+        return self.q_max_25 * max(0.25, min(1.0, factor))
 
     def affinity(self, t_c: float) -> float:
         return self.k_25 * math.exp(-self.k_temp_coeff * (t_c - 25.0))

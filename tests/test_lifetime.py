@@ -53,7 +53,8 @@ def test_3a_isotherm_anchors_at_25c():
 
 
 def test_capacity_falls_with_temperature():
-    assert MS3A.q_eq(0.5, 60.0) < MS3A.q_eq(0.5, 25.0) < MS3A.q_eq(0.5, 0.0)
+    assert MS3A.q_eq(0.5, 60.0) < MS3A.q_eq(0.5, 25.0)
+    assert MS3A.q_max(0.0) == MS3A.q_max(25.0)          # no cold bonus, by design
     assert MS3A.q_max(60.0) == pytest.approx(0.21 * (1 - 0.005 * 35), rel=1e-9)
 
 
