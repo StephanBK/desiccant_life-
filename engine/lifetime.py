@@ -263,6 +263,9 @@ class LifetimeResult:
     daily_cav_dew_c: list[float] = field(default_factory=list)
     daily_pane_min_c: list[float] = field(default_factory=list)
     daily_film_max_kg: list[float] = field(default_factory=list)
+    daily_t_out_c: list[float] = field(default_factory=list)
+    daily_rh_out: list[float] = field(default_factory=list)
+    daily_cond_g: list[float] = field(default_factory=list)
     # First-year hourly trace for the animation.
     year1: dict[str, list[float]] = field(default_factory=dict)
     tables: HourTables | None = field(default=None, repr=False)
@@ -521,6 +524,7 @@ def run_lifetime(
     total_uptake = 0.0
 
     daily_q, daily_rh, daily_dp, daily_pane, daily_film = [], [], [], [], []
+    daily_to, daily_rho, daily_cg = [], [], []
     year1: dict[str, list[float]] = {
         k: [] for k in (
             "t_out_c", "t_cold_c", "t_air_c", "w_cav", "rh_cav", "dew_cav_c",
@@ -532,6 +536,7 @@ def run_lifetime(
     for year in range(inp.max_years):
         y_cond = 0.0; y_hc = 0; y_hv = 0; y_up = 0.0; y_dp = 0.0
         d_q = d_rh = d_dp = 0.0; d_pane = 1e9; d_film = 0.0; d_n = 0
+        d_to = d_rho = d_cg = 0.0
 
         for i in range(n):
             w_sup = tb.w_supply[i]; w_sat = tb.w_sat_cold[i]
@@ -582,10 +587,13 @@ def run_lifetime(
             if keep_daily:
                 d_q += q; d_rh += rh_eq; d_dp += dp; d_n += 1
                 d_pane = min(d_pane, tb.t_cold_c[i]); d_film = max(d_film, film)
+                d_to += tb.t_out_c[i]; d_rho += weather.rh_out[i]; d_cg += hour_cond * 1000.0 * area
                 if d_n == 24:
                     daily_q.append(d_q / 24); daily_rh.append(d_rh / 24)
                     daily_dp.append(d_dp / 24); daily_pane.append(d_pane); daily_film.append(d_film)
+                    daily_to.append(d_to / 24); daily_rho.append(d_rho / 24); daily_cg.append(d_cg)
                     d_q = d_rh = d_dp = 0.0; d_pane = 1e9; d_film = 0.0; d_n = 0
+                    d_to = d_rho = d_cg = 0.0
 
             if exhausted_hour is None and m_des > 0.0 and q >= q_full:
                 exhausted_hour = hours_run
@@ -612,5 +620,6 @@ def run_lifetime(
         total_water_into_desiccant_g=total_uptake * 1000.0 * area, years=years,
         daily_loading=daily_q, daily_rh_eq=daily_rh, daily_cav_dew_c=daily_dp,
         daily_pane_min_c=daily_pane, daily_film_max_kg=daily_film,
+        daily_t_out_c=daily_to, daily_rh_out=daily_rho, daily_cond_g=daily_cg,
         year1=year1 if keep_year1 else {}, tables=tb,
     )

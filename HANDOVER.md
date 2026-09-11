@@ -1,7 +1,7 @@
 # HANDOVER — Desiccant Lifetime Simulator (ANLY-003)
 
-Last session: 2026-09-11. State: v0.1.0 built and verified locally, not yet
-deployed.
+Last session: 2026-09-11 (session 2). State: v0.2 built and verified
+locally; v0.1 is on GitHub (StephanBK/desiccant_life-), v0.2 not yet pushed.
 
 ## Where things stand
 
@@ -25,6 +25,17 @@ deployed.
    `WEATHER_CACHE_DIR` if the engine's weather cache should persist
    (see engine/weather.py).
 4. Healthcheck path `/api/health` is in railway.json.
+
+## Session 2 (2026-09-11) summary
+
+Order agreed: units/ladders, AERC leakage switch, audit + cross-check,
+property tests, rail + tooltips, cinematic tab. All done. See AUDIT.md.
+- Watch tab (Cinema.jsx): dark stage, vessel of 240 beads filling day by
+  day over the whole run, saturation gauge, outdoor and pane cues, the
+  two milestones, first-fog flash, timeline with markers, fullscreen.
+  Auto-plays on opening the tab. No logo asset yet: wordmark only.
+- Tooltips: engineering register (decision 2026-09-11), inputs and outputs.
+- Rail closed on first load with a summary strip.
 
 ## Decisions log
 

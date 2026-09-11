@@ -4,10 +4,11 @@ import Rail from './Rail.jsx'
 import Simulate from './Simulate.jsx'
 import Sweep from './Sweep.jsx'
 import Explain from './Explain.jsx'
+import Cinema from './Cinema.jsx'
 
 const alNum = (v, presets) => (typeof v === 'number' ? v : (presets?.find((p) => p.key === v)?.al_cfm_ft2 ?? v))
 
-const TABS = [['simulate', 'Simulate'], ['sweep', 'Sweep'], ['explain', 'Explain']]
+const TABS = [['simulate', 'Simulate'], ['cinema', 'Watch'], ['sweep', 'Sweep'], ['explain', 'Explain']]
 
 export default function App() {
   const [tab, setTab] = useState('simulate')
@@ -56,6 +57,7 @@ export default function App() {
           )}
           {error && <div className="status err">{error}</div>}
           {tab === 'simulate' && <Simulate result={result} busy={busy} inp={inp} />}
+          {tab === 'cinema' && <Cinema result={result} active={tab === 'cinema'} />}
           {tab === 'sweep' && <Sweep inp={inp} presets={presets} />}
           {tab === 'explain' && <Explain result={result} presets={presets} inp={inp} />}
         </main>

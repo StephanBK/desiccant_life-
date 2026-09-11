@@ -254,7 +254,11 @@ def _result_payload(r: LifetimeResult, echo: dict, location, weather, cached: bo
             "cavity_dew_f": _round_list([psychro.c_to_f(x) for x in r.daily_cav_dew_c], 2),
             "pane_min_f": _round_list([psychro.c_to_f(x) for x in r.daily_pane_min_c], 2),
             "film_um": _round_list([x * 1000.0 for x in r.daily_film_max_kg], 3),
+            "t_out_f": _round_list([psychro.c_to_f(x) for x in r.daily_t_out_c], 1),
+            "rh_out_pct": _round_list([100 * x for x in r.daily_rh_out], 1),
+            "condensed_g": _round_list(r.daily_cond_g, 4),
         },
+        "q_max_25": r.inputs.desiccant.q_max(25.0),
         "assumptions": ASSUMPTIONS,
     }
     if trace:
