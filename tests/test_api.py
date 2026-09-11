@@ -33,8 +33,9 @@ def client(monkeypatch, year):
 
 def test_presets_shape(client):
     d = client.get("/api/presets").get_json()
-    assert d["defaults"]["al_out"] == "resealed" and d["defaults"]["al_in"] == "certified_best"
-    assert [p["key"] for p in d["al_out"]][0] == "new_fixed" and [p["key"] for p in d["al_in"]][0] == "igu_grade"
+    assert d["defaults"]["al_out"] == "wet_sealed" and d["defaults"]["al_in"] == "wet_sealed"
+    assert [p["key"] for p in d["al_out"]][0] == "wet_sealed" and [p["key"] for p in d["al_in"]][0] == "wet_sealed"
+    assert {v["key"] for v in d["sealants"]} == {"silicone", "pib", "none"}
     assert d["leakage_reference"]["aerc_url"].startswith("https://aercenergyrating.org")
     assert d["desiccants"][0]["key"] == "ms3a"
     assert "desiccant_grams" in d["sweepable"]
@@ -44,11 +45,14 @@ def test_lifetime_defaults(client):
     d = client.get("/api/lifetime").get_json()
     h = d["headline"]
     assert h["exhausted_hour"] is not None and h["hours_per_gram"] > 0
-    assert d["inputs"]["al_out"] == 0.10 and d["inputs"]["al_in"] == 0.06 and d["inputs"]["dp_pa"] == 3.0
-    # derived: AL x 18.29 x (3/75)^0.65 / 0.0153 m
-    assert d["inputs"]["ach_out"] == pytest.approx(0.10 * 18.29 * (3 / 75) ** 0.65 / (0.6 * 0.0254), rel=1e-3)
-    assert d["inputs"]["ach_in"] == pytest.approx(0.06 * 18.29 * (3 / 75) ** 0.65 / (0.6 * 0.0254), rel=1e-3)
+    assert d["inputs"]["al_out"] == 0.005 and d["inputs"]["al_in"] == 0.005 and d["inputs"]["dp_pa"] == 3.0
+    assert d["inputs"]["ach_out"] == pytest.approx(0.005 * 18.29 * (3 / 75) ** 0.65 / (0.6 * 0.0254), rel=1e-3)
+    assert d["inputs"]["sealant_in"] == "silicone" and 0.02 < d["inputs"]["diffusion_g_per_day"] < 0.05
     assert d["inputs"]["capacity_g"] == pytest.approx(210.0)
+    e = client.get("/api/lifetime?al_out=0&al_in=0&wind_scaling=0&trace=0").get_json()["headline"]
+    f = client.get("/api/lifetime?al_out=0&al_in=0&wind_scaling=0&sealant_out=pib&sealant_in=pib&trace=0").get_json()["headline"]
+    assert e["exhausted_hour"] is not None and 5 < e["exhausted_years"] < 9        # silicone diffusion floor
+    assert f["exhausted_hour"] is None                                            # PIB: beyond 20 years
     assert len(d["year1"]["loading_pct"]) == 8760
     assert len(d["daily"]["loading"]) == 365
     assert d["year1"]["loading_pct"][-1] <= 100.0
@@ -81,7 +85,7 @@ def test_raw_ach_override_and_offset_dilution(client):
     assert thin == pytest.approx(4 * deep, rel=1e-3)          # same crack flow, 4x the air
 
 
-@pytest.mark.parametrize("q", ["f_cold=1.5", "grams=-1", "al_in=lots", "ach_in=-1", "dp_pa=-1", "desiccant=silica",
+@pytest.mark.parametrize("q", ["f_cold=1.5", "grams=-1", "al_in=lots", "ach_in=-1", "dp_pa=-1", "desiccant=silica", "sealant_in=tar", "bead_depth_in=0",
                                "orientation=up", "offset_in=0"])
 def test_lifetime_rejects_bad_input(client, q):
     assert client.get("/api/lifetime?" + q).status_code == 400

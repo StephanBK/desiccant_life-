@@ -42,6 +42,17 @@ property tests, rail + tooltips, cinematic tab. All done. See AUDIT.md.
 
 ## Decisions log
 
+- 2026-09-11 (late): INOVUES practice is wet-seal the existing window,
+  then a wet-sealed retrofit. Presets now start at "wet_sealed" 0.005
+  cfm/ft2 (ASTM E283 detection floor, ESTIMATE) on both ladders; the
+  hypothetical IGU-grade preset is gone. Sealant vapour diffusion added
+  (engine/leakage.py SEALANTS, silicone DOWSIL-795 class default, PIB
+  option, 1/4 x 1/4 in bead): 0.035 g/day room side, the floor when air
+  leakage is zero (1 kg lasts ~6.6 yr silicone, > 20 yr PIB).
+  At the detection floor 1 kg lasts ~16 days. The measurement that
+  decides which end of that range the real seal sits at: pressurise an
+  installed cavity through a port and read the flow at 3-10 Pa.
+
 - 2026-09-11: leakage inputs are rated air leakage (cfm/ft2 at 75 Pa,
   AERC / ASTM E283) plus an operating pressure (default 3 Pa); cavity ACH
   is derived (engine/leakage.py). Presets reference AERC: baseline

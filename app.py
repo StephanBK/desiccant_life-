@@ -29,8 +29,9 @@ from engine.cavity import f_warm_estimate
 from engine.desiccant import DESICCANTS, DEFAULT_DESICCANT, cartridge_volume_ml
 from engine.geometry import CavityGeometry
 from engine.leakage import (
-    DEFAULT_OPERATING_PA, EXISTING_BY_KEY, EXISTING_PRESETS, RETROFIT_BY_KEY, RETROFIT_PRESETS,
-    air_leakage_from_ach,
+    DEFAULT_BEAD_DEPTH_M, DEFAULT_BEAD_WIDTH_M, DEFAULT_OPERATING_PA, DEFAULT_SEALANT, EXISTING_BY_KEY,
+    EXISTING_PRESETS, RETROFIT_BY_KEY, RETROFIT_PRESETS, SEALANTS, air_leakage_from_ach,
+    sealant_diffusion_kg_per_h,
 )
 from engine.lifetime import LifetimeInputs, LifetimeResult, run_lifetime
 from engine.report import workbook_bytes
@@ -45,15 +46,16 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "dist")
 app = Flask(__name__, static_folder=DIST, static_url_path="")
 
-# First-load scenario, by decision (Sep 10 2026): freshly resealed old
-# facade outside, tightly built retrofit inside. Leakage in AERC units
-# (cfm/ft2 at 75 Pa) since Sep 11 2026; see engine/leakage.py.
+# First-load scenario (Sep 11 2026): INOVUES practice, existing window
+# wet-sealed then a wet-sealed retrofit, both at the E283 detection floor,
+# silicone bead diffusion as the vapour floor. See engine/leakage.py.
 DEFAULTS = {
     "address": "277 Park Avenue, New York, NY",
     "width_in": 60.0, "height_in": 96.0, "offset_in": 0.6,
     "f_cold": 0.30, "u_ip": 0.30, "r_ip": 0.97,
     "t_in_f": 70.0, "rh_in_pct": 35.0,
-    "al_out": "resealed", "al_in": "certified_best", "dp_pa": DEFAULT_OPERATING_PA,
+    "al_out": "wet_sealed", "al_in": "wet_sealed", "dp_pa": DEFAULT_OPERATING_PA,
+    "sealant_out": DEFAULT_SEALANT, "sealant_in": DEFAULT_SEALANT, "bead_width_in": 0.25, "bead_depth_in": 0.25,
     "grams": 1000.0, "desiccant": DEFAULT_DESICCANT,
     "orientation": "south", "absorptance": 0.10,
 }
@@ -122,6 +124,13 @@ def _leak(name: str, by_key: dict, default: str) -> float:
     return value
 
 
+def _choice(name: str, options: dict, default: str) -> str:
+    raw = (request.args.get(name) or default).strip().lower()
+    if raw not in options:
+        raise BadRequest(f"Parameter {name!r} must be one of {sorted(options)}, got {raw!r}")
+    return raw
+
+
 def _parse_inputs() -> tuple[LifetimeInputs, dict]:
     """Query string -> LifetimeInputs (SI). Returns the echo dict too."""
     address = (request.args.get("address") or DEFAULTS["address"]).strip()
@@ -165,6 +174,10 @@ def _parse_inputs() -> tuple[LifetimeInputs, dict]:
             ach_out=_ach("ach_out", {}, "0") if request.args.get("ach_out") else 0.0,
             ach_in=_ach("ach_in", {}, "0") if request.args.get("ach_in") else 0.0,
             dp_pa=_float("dp_pa", DEFAULTS["dp_pa"], 0.0, 75.0),
+            sealant_out=_choice("sealant_out", SEALANTS, DEFAULTS["sealant_out"]),
+            sealant_in=_choice("sealant_in", SEALANTS, DEFAULTS["sealant_in"]),
+            bead_width_m=_float("bead_width_in", DEFAULTS["bead_width_in"], 0.0, 2.0) * 0.0254,
+            bead_depth_m=_float("bead_depth_in", DEFAULTS["bead_depth_in"], 0.02, 2.0) * 0.0254,
             wind_scaling=_bool("wind_scaling", True),
             desiccant_grams=_float("grams", DEFAULTS["grams"], 0.0, 100000.0),
             desiccant_key=desiccant,
@@ -189,6 +202,11 @@ def _parse_inputs() -> tuple[LifetimeInputs, dict]:
         "t_in_f": round(psychro.c_to_f(inp.t_room_c), 2), "rh_in_pct": inp.rh_room * 100.0,
         "al_out": inp.al_out, "al_in": inp.al_in, "dp_pa": inp.dp_pa,
         "ach_out": round(inp.ach_out, 4), "ach_in": round(inp.ach_in, 4), "wind_scaling": inp.wind_scaling,
+        "sealant_out": inp.sealant_out, "sealant_in": inp.sealant_in,
+        "bead_width_in": round(inp.bead_width_m / 0.0254, 3), "bead_depth_in": round(inp.bead_depth_m / 0.0254, 3),
+        "diffusion_g_per_day": round(24 * 1000 * (
+            sealant_diffusion_kg_per_h(geometry.perimeter_m, inp.bead_width_m, inp.bead_depth_m, SEALANTS[inp.sealant_in],
+                                       psychro.p_w_from_w(psychro.w_from_t_rh(inp.t_room_c, inp.rh_room)))), 4),
         "grams": inp.desiccant_grams, "desiccant": desiccant, "tau_h": inp.tau,
         "desorption": inp.allow_desorption, "full_fraction": inp.full_fraction,
         "pane_coupling": inp.pane_coupling, "absorptance": inp.absorptance,
@@ -287,6 +305,8 @@ ASSUMPTIONS = [
     "Leakage presets: AERC baseline (2.0) and best certified insert (0.06 cfm/ft2) are published; the values between are estimates.",
     "Cavity ACH from rated leakage assumes an operating pressure (default 3 Pa) and the 0.65 crack-flow exponent; uncertainty about a factor of 3.",
     "Wind adds 0.5 rho v^2 Cp (Cp 0.6) to the outdoor path's operating pressure (toggle).",
+    "Wet-sealed preset (0.005 cfm/ft2) is the ASTM E283 detection floor, not a measurement of INOVUES seals; a cavity pressurisation test would replace it.",
+    "Sealant vapour diffusion uses ASTM E96 permeability ranges (silicone 30, PIB 0.3 g.mm/m2/day) with the cavity taken as dry: an upper bound on the floor.",
     "Pane warming from vent air is an upper bound.",
     "Evaporation from the pane is instantaneous up to saturation (upper bound on drying).",
     "Retained film cap 100 um; visible threshold 5 um; both unmeasured.",
@@ -317,6 +337,7 @@ def presets():
         "defaults": DEFAULTS,
         "al_out": [asdict(p) for p in EXISTING_PRESETS],
         "al_in": [asdict(p) for p in RETROFIT_PRESETS],
+        "sealants": [asdict(v) for v in SEALANTS.values()],
         "leakage_reference": {
             "test_pressure_pa": 75.0, "flow_exponent": 0.65, "default_operating_pa": DEFAULT_OPERATING_PA,
             "aerc_url": "https://aercenergyrating.org/product-search/commercial-product-search/",

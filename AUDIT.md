@@ -185,6 +185,22 @@ substep"):
   air, desorption off) uses the plain exchange step. Correct by
   construction: the air is no longer a fast variable then.
 
+## 3.8 Sealant vapour diffusion (added 2026-09-11)
+
+    J = P . (perimeter x bead width) . dp_v / bead depth
+
+- Permeabilities are ASTM E96 ranges, not product data (DOWSIL 795 does
+  not publish WVT): silicone 20-40 g.mm/m2/day at 38 degC/90 % RH, PIB
+  0.2-0.5. Uncertainty x2. Cavity taken as dry: upper bound.
+- 1/4 x 1/4 in silicone bead, 60 x 96 in window, 70 degF / 35 % RH:
+  0.035 g/day. With zero air leakage 1 kg of 3A lasts 6.6 years; PIB
+  > 20 years. This is the physical floor the old IGU-grade preset was
+  guessing at.
+- The wet-sealed air-leakage preset (0.005 cfm/ft2) is the E283 detection
+  floor, i.e. "not measurable by the standard test", not a measurement
+  of an INOVUES seal. Between 0.005 and 0 the answer moves from 16 days
+  to 6.6 years. Item 1 of section 4 (pressurisation test) resolves it.
+
 ## 4. What would tighten the numbers most, in order
 
 1. A measured operating pressure across an installed SWR cavity (a

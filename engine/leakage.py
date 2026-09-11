@@ -118,6 +118,7 @@ class LeakagePreset:
 
 #: Existing window: leakage from OUTDOORS into the cavity. Tightest first.
 EXISTING_PRESETS: list[LeakagePreset] = [
+    LeakagePreset("wet_sealed", "Wet-sealed, continuous bead", 0.005, "Estimate: continuous silicone bead over all joints, at the ASTM E283 detection floor; verify by cavity pressurisation test", True),
     LeakagePreset("new_fixed", "New fixed window", 0.06, "AAMA/ASTM E283 fixed-window specification", False),
     LeakagePreset("resealed", "Freshly resealed", 0.10, "Estimate: wet-sealed perimeter, serviceable gaskets", True),
     LeakagePreset("operable", "Operable, in spec", 0.30, "AAMA/WDMA/CSA 101 allowable for operable windows", False),
@@ -127,7 +128,7 @@ EXISTING_PRESETS: list[LeakagePreset] = [
 
 #: Retrofit: leakage from the ROOM into the cavity. Tightest first.
 RETROFIT_PRESETS: list[LeakagePreset] = [
-    LeakagePreset("igu_grade", "IGU-grade seal (hypothetical)", 0.0002, "Estimate: sealed-unit edge seal; no attachment product achieves this", True),
+    LeakagePreset("wet_sealed", "Wet-sealed, continuous bead", 0.005, "Estimate: INOVUES practice, continuous silicone bead on a fixed frame, at the ASTM E283 detection floor; verify by cavity pressurisation test", True),
     LeakagePreset("gasketed", "Well-gasketed fixed insert", 0.01, "Estimate: compression gasket on all four sides", True),
     LeakagePreset("certified_best", "Best certified insert", 0.06, "AERC best-in-class (Alpen WinSert, Dec 2021)", False),
     LeakagePreset("certified_typical", "Typical certified insert", 0.30, "Estimate at the AAMA operable allowable", True),
@@ -136,3 +137,55 @@ RETROFIT_PRESETS: list[LeakagePreset] = [
 
 EXISTING_BY_KEY = {p.key: p for p in EXISTING_PRESETS}
 RETROFIT_BY_KEY = {p.key: p for p in RETROFIT_PRESETS}
+
+
+# ---------------------------------------------------------------------------
+# Vapour diffusion through the sealant bead
+# ---------------------------------------------------------------------------
+# A continuous silicone bead stops air but passes water vapour; this is
+# why insulating glass units use polyisobutylene as the primary seal.
+# Once air leakage is at the detection floor, diffusion is the floor.
+#
+#     J = P_perm . A . dp_v / L        kg/h of water into the cavity
+#
+# with P_perm the sealant's water-vapour permeability, A the bead's
+# exposed area (perimeter x joint width), L the diffusion path (bead
+# depth) and dp_v the vapour-pressure difference across it. The cavity
+# side is taken as dry (desiccant present), which is the upper bound.
+#
+# Permeabilities, ASTM E96 wet cup at 38 degC / 90 % RH (dp_v ~ 5,960 Pa),
+# expressed per pascal. ESTIMATES from published ranges: silicone sealants
+# 20-40 g.mm/m2/day, PIB 0.2-0.5.
+
+@dataclass(frozen=True)
+class Sealant:
+    key: str
+    name: str
+    perm_g_mm_per_m2_day_pa: float
+    source: str
+
+
+SEALANTS: dict[str, Sealant] = {
+    "silicone": Sealant("silicone", "Silicone (DOWSIL 795 class)", 30.0 / 5960.0,
+                        "ESTIMATE: ASTM E96 range for silicone building sealants, 20-40 g.mm/m2/day at 38 degC/90 % RH"),
+    "pib": Sealant("pib", "Polyisobutylene (IGU primary seal)", 0.3 / 5960.0,
+                   "ESTIMATE: ASTM E96 range for PIB, 0.2-0.5 g.mm/m2/day"),
+    "none": Sealant("none", "No diffusion term", 0.0, "Diffusion ignored"),
+}
+DEFAULT_SEALANT = "silicone"
+DEFAULT_BEAD_WIDTH_M = 0.25 * 0.0254     # ASTM C1193 minimum joint, 1/4 in
+DEFAULT_BEAD_DEPTH_M = 0.25 * 0.0254
+
+
+def sealant_diffusion_kg_per_h(perimeter_m: float, bead_width_m: float, bead_depth_m: float,
+                               sealant: Sealant, dp_vapor_pa: float) -> float:
+    """Water diffusing through the bead, kg/h, for a dry cavity."""
+    if perimeter_m < 0 or bead_width_m < 0:
+        raise ValueError("perimeter and bead width cannot be negative")
+    if bead_depth_m <= 0:
+        raise ValueError("bead depth must be positive")
+    if sealant.perm_g_mm_per_m2_day_pa <= 0.0 or dp_vapor_pa <= 0.0:
+        return 0.0
+    area = perimeter_m * bead_width_m
+    g_per_day = sealant.perm_g_mm_per_m2_day_pa * area * dp_vapor_pa / (bead_depth_m * 1000.0)
+    return g_per_day / 1000.0 / 24.0

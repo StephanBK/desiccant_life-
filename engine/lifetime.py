@@ -67,7 +67,10 @@ from engine.cavity import (
 )
 from engine.desiccant import DESICCANTS, DEFAULT_DESICCANT, DesiccantType, uptake_step
 from engine.geometry import CavityGeometry
-from engine.leakage import DEFAULT_OPERATING_PA, ach_from_air_leakage, wind_pressure_pa
+from engine.leakage import (
+    DEFAULT_BEAD_DEPTH_M, DEFAULT_BEAD_WIDTH_M, DEFAULT_OPERATING_PA, DEFAULT_SEALANT, SEALANTS,
+    ach_from_air_leakage, sealant_diffusion_kg_per_h, wind_pressure_pa,
+)
 from engine.moisture import (
     MAX_SURFACE_FILM_KG_PER_M2,
     VISIBLE_FILM_KG_PER_M2,
@@ -77,6 +80,7 @@ from engine.moisture import (
 from engine.psychro import (
     atmospheric_pressure_pa,
     dew_point_from_w,
+    p_w_from_w,
     rh_from_t_w,
     w_from_t_rh,
     w_saturated,
@@ -163,6 +167,12 @@ class LifetimeInputs:
     al_out: float | None = None
     al_in: float | None = None
     dp_pa: float = DEFAULT_OPERATING_PA
+    # Sealant vapour diffusion, the floor once air leakage is at the test
+    # detection limit. Key into engine.leakage.SEALANTS; bead in metres.
+    sealant_out: str = DEFAULT_SEALANT
+    sealant_in: str = DEFAULT_SEALANT
+    bead_width_m: float = DEFAULT_BEAD_WIDTH_M
+    bead_depth_m: float = DEFAULT_BEAD_DEPTH_M
     desiccant_grams: float = 50.0
     desiccant_key: str = DEFAULT_DESICCANT
     tau_hours: float | None = None
@@ -187,6 +197,10 @@ class LifetimeInputs:
             raise ValueError(f"rh_room must be in [0, 1], got {self.rh_room}")
         if self.dp_pa < 0:
             raise ValueError("dp_pa cannot be negative")
+        if self.sealant_out not in SEALANTS or self.sealant_in not in SEALANTS:
+            raise ValueError(f"sealant must be one of {sorted(SEALANTS)}")
+        if self.bead_width_m < 0 or self.bead_depth_m <= 0:
+            raise ValueError("bead width cannot be negative and depth must be positive")
         if self.al_out is not None:
             self.ach_out = ach_from_air_leakage(self.al_out, self.dp_pa, self.geometry.offset_m)
         if self.al_in is not None:
@@ -230,6 +244,7 @@ class HourTables:
     w_supply: list[float]
     vent_rise_k: list[float]
     w_room: float
+    diff_kg_per_m2_h: list[float]
 
 
 @dataclass
@@ -293,7 +308,11 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
     has_cloud = bool(weather.cloud_type)
 
     t_cold_l, t_air_l, w_sat_l, m_cav_l, w_out_l = [], [], [], [], []
-    a_out_l, a_tot_l, w_sup_l, rise_l = [], [], [], []
+    a_out_l, a_tot_l, w_sup_l, rise_l, diff_l = [], [], [], [], []
+    perim = inp.geometry.perimeter_m
+    area = inp.geometry.glazing_area_m2
+    pw_room = p_w_from_w(w_room, p_atm)
+    j_in = sealant_diffusion_kg_per_h(perim, inp.bead_width_m, inp.bead_depth_m, SEALANTS[inp.sealant_in], pw_room) / area
 
     for i in range(n):
         t_o = weather.t_out_c[i]
@@ -346,11 +365,14 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
         m_cav_l.append(cavity_dry_air_mass(t_air, gap_m=gap, w=w_room, p_atm_pa=p_atm))
         w_out_l.append(w_out); a_out_l.append(a_out); a_tot_l.append(a_tot)
         w_sup_l.append(w_sup); rise_l.append(rise)
+        j_out = sealant_diffusion_kg_per_h(perim, inp.bead_width_m, inp.bead_depth_m, SEALANTS[inp.sealant_out], p_w_from_w(w_out, p_atm)) / area if w_out > 0 else 0.0
+        diff_l.append(j_in + j_out)
 
     return HourTables(
         n=n, t_out_c=list(weather.t_out_c), w_out=w_out_l, t_cold_c=t_cold_l,
         t_air_c=t_air_l, w_sat_cold=w_sat_l, m_cav=m_cav_l, ach_out=a_out_l,
         ach_total=a_tot_l, w_supply=w_sup_l, vent_rise_k=rise_l, w_room=w_room,
+        diff_kg_per_m2_h=diff_l,
     )
 
 
@@ -358,7 +380,7 @@ def coupled_substep(
     w_cav: float, q: float, film: float,
     w_sup: float, w_sat: float, a_tot: float, m_cav: float,
     m_des: float, des: DesiccantType, t_air: float, tau: float, dt: float,
-    allow_desorption: bool, p_atm: float, film_cap: float,
+    allow_desorption: bool, p_atm: float, film_cap: float, j_diff: float = 0.0,
 ) -> tuple[float, float, float, float, float]:
     """One substep with air, desiccant and cold pane solved TOGETHER.
 
@@ -405,6 +427,7 @@ def coupled_substep(
     # is not allowed to give it back): the air is no longer a fast variable,
     # so use the plain exchange + pane step.
     if not allow_desorption and q_eq_of(max(w_sup, w_cav)) <= q:
+        w_cav = w_cav + j_diff * dt / m_cav
         w_new, c, _e, film = step_hour(w_cav, w_sup, w_sat, a_tot, m_cav, film, dt)
         film, _d = drain_excess(film, film_cap)
         return w_new, q, film, c, 0.0
@@ -414,15 +437,17 @@ def coupled_substep(
         return d if (allow_desorption or d > 0.0) else 0.0
 
     def S(W):
-        return a_tot * m_cav * (w_sup - W)
+        return a_tot * m_cav * (w_sup - W) + j_diff       # vents plus sealant diffusion
 
     # --- quasi-steady humidity W* -------------------------------------
     w_eq = _w_from_rh(des.rh_eq(q, t_air), t_air, p_atm)
     if not allow_desorption and w_eq > w_sup:
         w_eq = w_sup                     # cannot push air above supply without desorbing
     lo, hi = min(w_sup, w_eq), max(w_sup, w_eq)
-    if a_tot <= 0.0:
+    if a_tot <= 0.0 and j_diff <= 0.0:
         w_star = w_eq
+    elif a_tot <= 0.0:
+        w_star = w_eq if j_diff <= 0.0 else _bisect_source(D, j_diff, w_eq, w_sat)
     elif hi - lo < 1e-12:
         w_star = lo
     else:
@@ -477,6 +502,22 @@ def coupled_substep(
     if film > film_cap:
         film = film_cap
     return w_new, q, film, condensed, uptake
+
+
+def _bisect_source(D, j, w_eq, w_sat):
+    """No vents, only diffusion: D(W) = j has a root above w_eq (D rises
+    with W). Bracket to saturation; if even saturation cannot absorb j the
+    pane takes the rest (caller handles W* >= w_sat)."""
+    lo, hi = w_eq, max(w_sat, w_eq * 1.01 + 1e-9)
+    if D(hi) < j:
+        return hi
+    for _ in range(48):
+        mid = 0.5 * (lo + hi)
+        if D(mid) < j:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
 
 
 def _w_from_rh(rh: float, t_c: float, p_atm: float) -> float:
@@ -543,17 +584,19 @@ def run_lifetime(
             m_cav = tb.m_cav[i]; a_tot = tb.ach_total[i]; t_air = tb.t_air_c[i]
             hour_cond = 0.0; hour_up = 0.0
 
+            j_diff = tb.diff_kg_per_m2_h[i]
             if m_des > 0.0:
                 # Coupled air/desiccant/pane step. Substeps only need to
                 # resolve the desiccant's own time constant.
                 for _ in range(nsub):
                     w_cav, q, film, c, up = coupled_substep(
                         w_cav, q, film, w_sup, w_sat, a_tot, m_cav, m_des, des, t_air,
-                        tau, dt, inp.allow_desorption, p_atm, inp.max_film_kg,
+                        tau, dt, inp.allow_desorption, p_atm, inp.max_film_kg, j_diff,
                     )
                     hour_cond += c
                     hour_up += up
             else:
+                w_cav = w_cav + j_diff / m_cav                  # diffusion, then exchange
                 w_cav, c, _e, film = step_hour(w_cav, w_sup, w_sat, a_tot, m_cav, film, 1.0)
                 hour_cond += c
                 film, _drained = drain_excess(film, inp.max_film_kg)

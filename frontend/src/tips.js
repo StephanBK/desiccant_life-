@@ -59,12 +59,32 @@ export const TIPS = {
   al_in: {
     what: 'Rated air leakage of the RETROFIT (the secondary window), cfm/ft² at 75 Pa.',
     how: 'Same conversion as the existing window. Room air enters at the room humidity ratio W_room = f(T_room, RH_room). Supply humidity to the cavity is the flow-weighted mix of both streams.',
-    src: 'AERC best certified insert 0.06 (Alpen WinSert, Dec 2021, ticked). IGU-grade 0.0002 is hypothetical: no attachment reaches it and crack-flow scaling is not the physics of a sealed edge.',
+    src: 'AERC best certified insert 0.06 (Alpen WinSert, Dec 2021, ticked). Wet-sealed 0.005 is the ASTM E283 detection floor, the INOVUES practice (continuous silicone bead), an estimate until a cavity pressurisation test replaces it. Below the floor, sealant diffusion takes over.',
   },
   dp_pa: {
     what: 'Operating pressure difference across each layer, Pa.',
     how: 'Scales the rated leakage from the 75 Pa test to service conditions via (ΔP/75)^0.65. Applied to both layers (in series the tighter one takes most of the total).',
     src: 'Default 3 Pa: stack over 8 ft at 25 K ≈ 2.5 Pa, wind at 4 m/s ≈ 5.8 Pa (added separately). Fill time ±25 % for 1.5 to 6 Pa; the largest single uncertainty (AUDIT §1 row 1).',
+  },
+  sealant_out: {
+    what: 'Sealant used to wet-seal the existing window on its cavity side.',
+    how: 'Water vapour diffuses through the bead: J = P · (perimeter × bead width) · Δp_v / bead depth, with the cavity taken as dry (upper bound). Added to the supply as a constant trickle at the outdoor vapour pressure.',
+    src: 'Silicone permeability 30 g·mm/m²/day at the ASTM E96 condition (published range 20 to 40); PIB 0.3. ESTIMATES. DOWSIL 795 class is the common weatherseal.',
+  },
+  sealant_in: {
+    what: 'Sealant used on the retrofit frame perimeter.',
+    how: 'Same diffusion law, at the room vapour pressure. A 1/4 × 1/4 in silicone bead on a 60 × 96 in window passes about 0.035 g/day at 70 °F / 35 % RH; PIB about 0.0003.',
+    src: 'ASTM E96 ranges. With zero air leakage the silicone floor fills 1 kg of 3A in about 6.6 years; PIB beyond 20.',
+  },
+  bead_width_in: {
+    what: 'Joint width the bead bridges, inches. Sets the exposed diffusion area (perimeter × width).',
+    how: 'Diffusion scales linearly with it.',
+    src: 'ASTM C1193 minimum joint 1/4 in.',
+  },
+  bead_depth_in: {
+    what: 'Bead depth, the diffusion path length, inches.',
+    how: 'Diffusion scales inversely with it.',
+    src: 'ASTM C1193 typical 1/4 in for small joints.',
   },
   // ---------------------------------------------------------------- room
   t_in: {

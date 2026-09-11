@@ -87,6 +87,21 @@ export default function Rail({ inp, set, presets, busy, onRun, onClose }) {
         </div>
 
         <div className="group">
+          <h3>Seals<span>vapour through the bead</span></h3>
+          <div className="field"><label>Existing window <Tip id="sealant_out" /></label>
+            <select value={inp.sealant_out} onChange={(e) => set('sealant_out', e.target.value)}>
+              {(presets?.sealants || []).map((d) => <option key={d.key} value={d.key}>{d.name}</option>)}
+            </select></div>
+          <div className="field"><label>Retrofit <Tip id="sealant_in" /></label>
+            <select value={inp.sealant_in} onChange={(e) => set('sealant_in', e.target.value)}>
+              {(presets?.sealants || []).map((d) => <option key={d.key} value={d.key}>{d.name}</option>)}
+            </select></div>
+          <Num label="Bead width" k="bead_width_in" unit="in" inp={inp} set={set} min={0} />
+          <Num label="Bead depth" k="bead_depth_in" unit="in" inp={inp} set={set} min={0.02} />
+          <p className="hint">Silicone stops air but passes water vapour about 100× faster than the polyisobutylene an IGU uses. This is the floor once air leakage is at zero.</p>
+        </div>
+
+        <div className="group">
           <h3>Room</h3>
           <Num label="Temperature" k="t_in" unit="°F" inp={inp} set={set} min={40} max={100} />
           <Num label="Relative humidity" k="rh_in" unit="%" inp={inp} set={set} min={0} max={100} />

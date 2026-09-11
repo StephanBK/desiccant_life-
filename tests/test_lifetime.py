@@ -11,6 +11,7 @@ import gzip
 from pathlib import Path
 
 import pytest
+from dataclasses import replace
 
 from engine.cavity import vent_cold_surface_rise, vent_cold_surface_rise_two_path
 from engine.desiccant import DESICCANTS, cartridge_volume_ml, uptake_step, water_removed_kg
@@ -306,3 +307,24 @@ def test_wind_enters_as_pressure_when_al_given(base, weather):
     tb0 = build_tables(calm, weather, None)
     assert all(a >= b for a, b in zip(tb.ach_out, tb0.ach_out))     # wind only adds pressure
     assert max(tb.ach_out) > 1.5 * tb0.ach_out[0]                    # and it matters on a windy hour
+
+
+def test_sealant_diffusion_anchor_and_floor(weather):
+    from engine.leakage import SEALANTS, sealant_diffusion_kg_per_h
+    from engine import psychro
+    geo = CavityGeometry.from_inches(60, 96, 0.6)
+    pw = psychro.p_w_from_w(psychro.w_from_t_rh(21.1, 0.35))
+    j = sealant_diffusion_kg_per_h(geo.perimeter_m, 0.00635, 0.00635, SEALANTS["silicone"], pw)
+    assert 0.02 < j * 1000 * 24 < 0.05                        # g/day, hand calc ~0.035
+    assert sealant_diffusion_kg_per_h(geo.perimeter_m, 0.00635, 0.00635, SEALANTS["pib"], pw) < j / 50
+    assert sealant_diffusion_kg_per_h(geo.perimeter_m, 0.00635, 0.00635, SEALANTS["none"], pw) == 0.0
+    # thicker bead, slower; wider joint, faster
+    assert sealant_diffusion_kg_per_h(geo.perimeter_m, 0.00635, 0.0127, SEALANTS["silicone"], pw) == pytest.approx(j / 2)
+    assert sealant_diffusion_kg_per_h(geo.perimeter_m, 0.0127, 0.00635, SEALANTS["silicone"], pw) == pytest.approx(2 * j)
+    # with zero air leakage the diffusion floor alone fills 1 kg in years, not days
+    inp = LifetimeInputs(geometry=geo, f_cold=0.30, f_warm=0.59, u_assembly=1.703, al_out=0.0, al_in=0.0,
+                         wind_scaling=False, desiccant_grams=1000, max_years=20, absorptance=0.0, sky_radiation=False)
+    r = run_lifetime(inp, weather, keep_year1=False, keep_daily=False)
+    assert r.exhausted_hour is not None and 4 * 8760 < r.exhausted_hour < 10 * 8760
+    none = run_lifetime(replace(inp, sealant_out="none", sealant_in="none"), weather, keep_year1=False, keep_daily=False)
+    assert none.exhausted_hour is None
