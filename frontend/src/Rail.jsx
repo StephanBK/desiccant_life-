@@ -1,4 +1,4 @@
-import { fmt } from './api.js'
+import { achFromAL, fmt } from './api.js'
 
 function Num({ label, k, inp, set, step = 1, min, max, unit }) {
   return (
@@ -11,21 +11,28 @@ function Num({ label, k, inp, set, step = 1, min, max, unit }) {
 
 function Ladder({ k, inp, set, presets, note }) {
   const cur = inp[k]
-  const active = (p) => cur === p.key || Number(cur) === p.value
+  const active = (p) => cur === p.key || Number(cur) === p.al_cfm_ft2
+  const value = typeof cur === 'number' ? cur : (presets.find((p) => p.key === cur)?.al_cfm_ft2 ?? '')
+  const ach = achFromAL(Number(value), Number(inp.dp_pa), Number(inp.offset_in))
+  const sel = presets.find((p) => active(p))
   return (
     <>
       <div className="ladder">
         {presets.map((p) => (
-          <button key={p.key} type="button" aria-pressed={active(p)} title={p.label} onClick={() => set(k, p.key)}>
-            {p.key.replace('_', ' ')}
+          <button key={p.key} type="button" aria-pressed={active(p)} title={`${p.al_cfm_ft2} cfm/ft² at 75 Pa. ${p.source}`} onClick={() => set(k, p.key)}>
+            {p.label}{p.estimate ? '' : ' ✓'}
           </button>
         ))}
       </div>
       <div className="field">
-        <label>Value <span className="unit">ACH</span></label>
-        <input type="number" step="0.001" min="0" value={typeof cur === 'number' ? cur : (presets.find((p) => p.key === cur)?.value ?? '')} onChange={(e) => set(k, Number(e.target.value))} />
+        <label>Air leakage <span className="unit">cfm/ft² at 75 Pa</span></label>
+        <input type="number" step="0.01" min="0" value={value} onChange={(e) => set(k, Number(e.target.value))} />
       </div>
-      <p className="hint">{note}</p>
+      <div className="field derived">
+        <label>Cavity air changes <span className="unit">derived</span></label>
+        <output>{Number.isFinite(ach) ? `${fmt.g(ach)} ACH` : ''}</output>
+      </div>
+      <p className="hint">{sel ? sel.source : 'Custom value.'} {note}</p>
     </>
   )
 }
@@ -65,14 +72,16 @@ export default function Rail({ inp, set, presets, busy, onRun }) {
         </div>
 
         <div className="group">
-          <h3>Outdoor leakage<span>through the existing window</span></h3>
-          {presets && <Ladder k="ach_out" inp={inp} set={set} presets={presets.ach_out} note="Air changes of the cavity volume per hour, at 4 m/s wind." />}
-          <Check label="Scale with hourly wind speed" k="wind_scaling" inp={inp} set={set} />
+          <h3>Existing window<span>leakage from outdoors</span></h3>
+          {presets && <Ladder k="al_out" inp={inp} set={set} presets={presets.al_out} note="✓ marks a published number." />}
+          <Check label="Add wind pressure hour by hour" k="wind_scaling" inp={inp} set={set} />
         </div>
 
         <div className="group">
-          <h3>Room-side vent<span>through the retrofit</span></h3>
-          {presets && <Ladder k="ach_in" inp={inp} set={set} presets={presets.ach_in} note="Deliberate vent or perimeter leakage into the room." />}
+          <h3>Retrofit<span>leakage from the room</span></h3>
+          {presets && <Ladder k="al_in" inp={inp} set={set} presets={presets.al_in} note="Type the value from an AERC certificate or test report." />}
+          <Num label="Operating pressure" k="dp_pa" unit="Pa" inp={inp} set={set} step={0.5} min={0} max={75} />
+          <p className="hint">Ratings are measured at 75 Pa. A cavity sees about 2 to 6 Pa of stack and wind; flow scales with pressure^0.65. <a href={presets?.leakage_reference?.aerc_url} target="_blank" rel="noreferrer">AERC certified product search</a></p>
         </div>
 
         <div className="group">

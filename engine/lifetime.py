@@ -64,6 +64,7 @@ from engine.cavity import (
 )
 from engine.desiccant import DESICCANTS, DEFAULT_DESICCANT, DesiccantType, uptake_step
 from engine.geometry import CavityGeometry
+from engine.leakage import DEFAULT_OPERATING_PA, ach_from_air_leakage, wind_pressure_pa
 from engine.moisture import (
     MAX_SURFACE_FILM_KG_PER_M2,
     VISIBLE_FILM_KG_PER_M2,
@@ -116,10 +117,10 @@ ACH_IN_LABELS: dict[str, str] = {
     "open_vent": "Open vent - deliberate vent slots",
 }
 
-#: Wind scaling of the OUTDOOR path. Infiltration through cracks goes as
-#: dP^0.65 and wind pressure as v^2, so flow ~ v^1.3. A floor keeps the stack
-#: and pressure-equalisation share alive at zero wind. Reference 4 m/s is a
-#: typical NSRDB annual mean at 2 m. ESTIMATE.
+#: LEGACY wind scaling of the OUTDOOR path, used only when leakage is given
+#: as a bare ACH. With a rated air leakage the wind enters as pressure
+#: (engine.leakage.wind_pressure_pa added to dp_pa), which is the physical
+#: form. Kept so older tests and API calls with ach_out= still run.
 WIND_REF_M_S = 4.0
 WIND_EXPONENT = 1.3
 WIND_FLOOR = 0.3
@@ -153,6 +154,12 @@ class LifetimeInputs:
     ach_out: float = 1.0
     ach_in: float = 0.5
     wind_scaling: bool = True
+    # Preferred way to set leakage: rated air leakage in cfm/ft2 at 75 Pa
+    # (AERC / ASTM E283) plus the operating pressure. When given, ach_out /
+    # ach_in are DERIVED from these and the cavity offset (engine.leakage).
+    al_out: float | None = None
+    al_in: float | None = None
+    dp_pa: float = DEFAULT_OPERATING_PA
     desiccant_grams: float = 50.0
     desiccant_key: str = DEFAULT_DESICCANT
     tau_hours: float | None = None
@@ -175,6 +182,12 @@ class LifetimeInputs:
             raise ValueError("u_assembly must be positive")
         if not 0.0 <= self.rh_room <= 1.0:
             raise ValueError(f"rh_room must be in [0, 1], got {self.rh_room}")
+        if self.dp_pa < 0:
+            raise ValueError("dp_pa cannot be negative")
+        if self.al_out is not None:
+            self.ach_out = ach_from_air_leakage(self.al_out, self.dp_pa, self.geometry.offset_m)
+        if self.al_in is not None:
+            self.ach_in = ach_from_air_leakage(self.al_in, self.dp_pa, self.geometry.offset_m)
         if self.ach_out < 0 or self.ach_in < 0:
             raise ValueError("ACH values cannot be negative")
         if self.desiccant_grams < 0:
@@ -291,7 +304,12 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
                 op = cloud_opacity(weather.cloud_type[i]) if has_cloud else 0.0
                 t_cold += radiative_surface_drop(t_cold, t_o, h_out, opacity=op)
 
-        a_out = wind_scaled_ach(inp.ach_out, wind) if inp.wind_scaling else inp.ach_out
+        if inp.wind_scaling and inp.al_out is not None:
+            a_out = ach_from_air_leakage(inp.al_out, inp.dp_pa + wind_pressure_pa(wind), gap)
+        elif inp.wind_scaling:
+            a_out = wind_scaled_ach(inp.ach_out, wind)
+        else:
+            a_out = inp.ach_out
         a_in = inp.ach_in
         a_tot = a_out + a_in
 

@@ -254,3 +254,47 @@ def test_sweep_rejects_bad_keys(base, weather):
         sweep_1d(base, weather, "moon_phase", [1])
     with pytest.raises(ValueError):
         sweep_2d(base, weather, "ach_in", [1], "ach_in", [2])
+
+
+
+# ---------------------------------------------------------------------------
+# Rated air leakage -> ACH (engine.leakage)
+# ---------------------------------------------------------------------------
+
+def test_leakage_conversion_anchors():
+    from engine.leakage import ach_from_air_leakage, air_leakage_from_ach, wind_pressure_pa, stack_pressure_pa
+    off = 0.6024 * 0.0254
+    # AERC baseline single-pane at 2 Pa: a few hundred ACH in a 0.6 in cavity
+    assert 200 < ach_from_air_leakage(2.0, 2.0, off) < 260
+    # best certified insert at 3 Pa: order 10 ACH
+    assert 5 < ach_from_air_leakage(0.06, 3.0, off) < 12
+    # deeper cavity dilutes linearly
+    assert ach_from_air_leakage(0.06, 3.0, 4 * off) == pytest.approx(ach_from_air_leakage(0.06, 3.0, off) / 4)
+    # round trip
+    assert air_leakage_from_ach(ach_from_air_leakage(0.3, 3.0, off), 3.0, off) == pytest.approx(0.3)
+    # pressure anchors quoted in the docstring
+    assert stack_pressure_pa(2.44, 25.0) == pytest.approx(2.5, abs=0.1)
+    assert wind_pressure_pa(4.0) == pytest.approx(5.8, abs=0.1)
+    assert ach_from_air_leakage(0.06, 0.0, off) == 0.0
+
+
+def test_inputs_derive_ach_from_al(base):
+    from dataclasses import replace
+    from engine.leakage import ach_from_air_leakage
+    inp = replace(base, al_out=0.10, al_in=0.06, dp_pa=3.0)
+    assert inp.ach_out == pytest.approx(ach_from_air_leakage(0.10, 3.0, base.geometry.offset_m))
+    assert inp.ach_in == pytest.approx(ach_from_air_leakage(0.06, 3.0, base.geometry.offset_m))
+    # changing offset via sweep recomputes the derived ACH
+    from engine.sweep import _with
+    deeper = _with(inp, "offset_m", 4 * base.geometry.offset_m)
+    assert deeper.ach_in == pytest.approx(inp.ach_in / 4)
+
+
+def test_wind_enters_as_pressure_when_al_given(base, weather):
+    from dataclasses import replace
+    inp = replace(base, al_out=0.10, al_in=0.06, wind_scaling=True)
+    tb = build_tables(inp, weather, None)
+    calm = replace(inp, wind_scaling=False)
+    tb0 = build_tables(calm, weather, None)
+    assert all(a >= b for a, b in zip(tb.ach_out, tb0.ach_out))     # wind only adds pressure
+    assert max(tb.ach_out) > 1.5 * tb0.ach_out[0]                    # and it matters on a windy hour

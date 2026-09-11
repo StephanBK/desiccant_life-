@@ -25,6 +25,14 @@ deployed.
 
 ## Decisions log
 
+- 2026-09-11: leakage inputs are rated air leakage (cfm/ft2 at 75 Pa,
+  AERC / ASTM E283) plus an operating pressure (default 3 Pa); cavity ACH
+  is derived (engine/leakage.py). Presets reference AERC: baseline
+  single-pane 2.0, best certified insert 0.06 (Alpen WinSert). Raw ACH
+  remains an API override (ach_out=, ach_in=). Wind now enters as
+  pressure (0.5 rho v^2 Cp) on the outdoor path.
+- 2026-09-11: headline numbers share one unit, months/years toggle.
+
 - Only 3A molecular sieve in the library for now; dataclass is general.
 - Desiccant uptake is first-order with tau default 2 h (input).
 - Desorption (giving water back when hot and dry) is a toggle, default off.
@@ -39,16 +47,13 @@ deployed.
 
 ## Key finding so far (277 Park, 60x96x0.6 in, 50 g 3A)
 
-| outdoor / room ACH   | full after | h per g |
-|----------------------|-----------:|--------:|
-| 1.0 / 0.5 (typical)  | 34 h       | 0.7     |
-| 0.02 / 0.1 (default) | 244 h      | 4.9     |
-| 0.002 / 0.005        | ~180 d     | 86      |
-| same, desorption on  | ~1 yr      | 182     |
-
-Desiccant is an IGU-grade-seal technology; at vented-cavity leakage it
-buys days. The 2-D sweep (mass x outdoor leakage) shows where it flips,
-and that the room-side vent becomes the limiter once outdoor is tight.
+AERC-converted leakage (3 Pa, 0.6 in cavity): baseline single-pane
+window ~230 ACH, best certified insert ~9 ACH. Default scenario
+(resealed 0.10 / best insert 0.06): 50 g full in 11 h, 0.22 h/g,
+~40 kg for a year. Earlier ACH ladders (0.02 / 0.1 "sealed") were two
+orders of magnitude tighter than any certified product; see audit.
+Desiccant is an IGU-grade-seal technology. The 2-D sweep (mass x
+retrofit leakage) shows where it flips; deeper cavities help linearly.
 
 ## Backlog
 

@@ -7,7 +7,7 @@ export const DEFAULT_INPUTS = {
   width_in: 60, height_in: 96, offset_in: 0.6024,
   f_cold: 0.30, u_ip: 0.30, r_ip: 0.97, f_warm: '',
   t_in: 70, rh_in: 35,
-  ach_out: 'sealed', ach_in: 'sealed',
+  al_out: 'resealed', al_in: 'certified_best', dp_pa: 3,
   wind_scaling: true,
   grams: 50, desiccant: 'ms3a', tau_h: '',
   desorption: false, full_fraction: 0.95,
@@ -54,4 +54,11 @@ export const fmt = {
     const m = date.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })
     return `${m} ${date.getUTCDate()}, ${String(hour % 24).padStart(2, '0')}:00`
   },
+}
+
+// Mirror of engine/leakage.py so the rail can show the derived ACH live.
+export function achFromAL(alCfmFt2, dpPa, offsetIn) {
+  const offsetM = offsetIn * 0.0254
+  if (!(offsetM > 0)) return NaN
+  return alCfmFt2 * 18.29 * Math.pow(dpPa / 75, 0.65) / offsetM
 }

@@ -5,8 +5,9 @@ import { api, fmt } from './api.js'
 // User-unit labels for each sweepable engine key.
 const AXES = {
   desiccant_grams: { label: 'Desiccant mass', unit: 'g', from: 10, to: 1000, log: true },
-  ach_out: { label: 'Outdoor leakage', unit: 'ACH', from: 0.002, to: 20, log: true },
-  ach_in: { label: 'Room-side vent', unit: 'ACH', from: 0.005, to: 20, log: true },
+  al_out: { label: 'Existing-window leakage', unit: 'cfm/ft²', from: 0.06, to: 2, log: true },
+  al_in: { label: 'Retrofit leakage', unit: 'cfm/ft²', from: 0.0002, to: 2, log: true },
+  dp_pa: { label: 'Operating pressure', unit: 'Pa', from: 1, to: 10, log: false },
   rh_room: { label: 'Room RH', unit: '%', from: 20, to: 60, log: false },
   t_room_c: { label: 'Room temperature', unit: '°F', from: 62, to: 78, log: false },
   width_m: { label: 'Cavity width', unit: 'in', from: 24, to: 120, log: false },
@@ -109,7 +110,7 @@ function Line1D({ res }) {
 
 export default function Sweep({ inp }) {
   const [x, setX] = useState({ key: 'desiccant_grams', from: 10, to: 1000, n: 8, log: true })
-  const [y, setY] = useState({ key: 'ach_out', from: 0.002, to: 20, n: 6, log: true })
+  const [y, setY] = useState({ key: 'al_in', from: 0.0002, to: 2, n: 6, log: true })
   const [res, setRes] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)

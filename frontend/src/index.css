@@ -99,13 +99,15 @@ button { cursor: pointer; }
 .field select { text-align: left; }
 .field input[type="text"] { text-align: left; }
 .field.wide { grid-template-columns: 1fr; }
-.ladder { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin: 6px 0 4px; }
+.ladder { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; margin: 6px 0 4px; }
 .ladder button {
   border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius-s);
-  padding: 6px 4px; font-size: 12px; font-weight: 600; color: var(--ink-2);
+  padding: 6px 6px; font-size: 12px; font-weight: 600; color: var(--ink-2); text-align: left; line-height: 1.25;
 }
 .ladder button[aria-pressed="true"] { background: var(--glass-2); border-color: var(--glass); color: var(--glass); }
 .hint { color: var(--ink-3); font-size: 12px; margin: 4px 0 0; line-height: 1.4; }
+.hint a { color: var(--glass); }
+.field.derived output { text-align: right; font-weight: 700; color: var(--glass); }
 .check { display: flex; align-items: center; gap: 8px; margin: 8px 0; color: var(--ink-2); }
 .check input { width: 15px; height: 15px; accent-color: var(--glass); }
 .est { display: inline-block; font-size: 11px; font-weight: 700; color: #9a7330; background: var(--sand-2); padding: 1px 6px; border-radius: 4px; margin-left: 6px; }

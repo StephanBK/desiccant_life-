@@ -24,8 +24,11 @@ from engine.lifetime import LifetimeInputs, LifetimeResult, build_tables, run_li
 #: invalidates the precomputed hour tables.
 SWEEPABLE: dict[str, dict] = {
     "desiccant_grams": {"label": "Desiccant mass", "unit": "g", "tables": False},
-    "ach_out": {"label": "Outdoor leakage", "unit": "ACH", "tables": True},
-    "ach_in": {"label": "Room-side vent", "unit": "ACH", "tables": True},
+    "al_out": {"label": "Existing-window air leakage", "unit": "cfm/ft2 @75Pa", "tables": True},
+    "al_in": {"label": "Retrofit air leakage", "unit": "cfm/ft2 @75Pa", "tables": True},
+    "dp_pa": {"label": "Operating pressure", "unit": "Pa", "tables": True},
+    "ach_out": {"label": "Outdoor leakage (raw)", "unit": "ACH", "tables": True},
+    "ach_in": {"label": "Room-side vent (raw)", "unit": "ACH", "tables": True},
     "rh_room": {"label": "Room RH", "unit": "fraction", "tables": True},
     "t_room_c": {"label": "Room temperature", "unit": "degC", "tables": True},
     "width_m": {"label": "Cavity width", "unit": "m", "tables": True},
@@ -49,6 +52,10 @@ def _with(inp: LifetimeInputs, key: str, value: float) -> LifetimeInputs:
             offset_m=value if key == "offset_m" else g.offset_m,
         )
         return replace(inp, geometry=geo)
+    if key == "ach_out":
+        return replace(inp, ach_out=value, al_out=None)
+    if key == "ach_in":
+        return replace(inp, ach_in=value, al_in=None)
     return replace(inp, **{key: value})
 
 

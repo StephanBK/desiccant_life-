@@ -28,10 +28,11 @@ from engine import psychro
 from engine.cavity import f_warm_estimate
 from engine.desiccant import DESICCANTS, DEFAULT_DESICCANT, cartridge_volume_ml
 from engine.geometry import CavityGeometry
-from engine.lifetime import (
-    ACH_IN_LABELS, ACH_IN_PRESETS, ACH_OUT_LABELS, ACH_OUT_PRESETS,
-    LifetimeInputs, LifetimeResult, run_lifetime,
+from engine.leakage import (
+    DEFAULT_OPERATING_PA, EXISTING_BY_KEY, EXISTING_PRESETS, RETROFIT_BY_KEY, RETROFIT_PRESETS,
+    air_leakage_from_ach,
 )
+from engine.lifetime import LifetimeInputs, LifetimeResult, run_lifetime
 from engine.report import workbook_bytes
 from engine.solar import ORIENTATIONS, poa_series
 from engine.sweep import SWEEPABLE, sweep_1d, sweep_2d
@@ -45,13 +46,14 @@ DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "dist"
 app = Flask(__name__, static_folder=DIST, static_url_path="")
 
 # First-load scenario, by decision (Sep 10 2026): freshly resealed old
-# facade outside, tightly built retrofit inside.
+# facade outside, tightly built retrofit inside. Leakage in AERC units
+# (cfm/ft2 at 75 Pa) since Sep 11 2026; see engine/leakage.py.
 DEFAULTS = {
     "address": "277 Park Avenue, New York, NY",
     "width_in": 60.0, "height_in": 96.0, "offset_in": 0.6024,
     "f_cold": 0.30, "u_ip": 0.30, "r_ip": 0.97,
     "t_in_f": 70.0, "rh_in_pct": 35.0,
-    "ach_out": "sealed", "ach_in": "sealed",
+    "al_out": "resealed", "al_in": "certified_best", "dp_pa": DEFAULT_OPERATING_PA,
     "grams": 50.0, "desiccant": DEFAULT_DESICCANT,
     "orientation": "south", "absorptance": 0.10,
 }
@@ -106,6 +108,20 @@ def _ach(name: str, presets: dict, default: str) -> float:
     return value
 
 
+def _leak(name: str, by_key: dict, default: str) -> float:
+    """Rated air leakage, cfm/ft2 at 75 Pa: a preset key or a number."""
+    raw = (request.args.get(name) or default).strip().lower()
+    if raw in by_key:
+        return by_key[raw].al_cfm_ft2
+    try:
+        value = float(raw)
+    except ValueError:
+        raise BadRequest(f"Parameter {name!r} must be a number or one of {sorted(by_key)}, got {raw!r}")
+    if value < 0:
+        raise BadRequest(f"Parameter {name!r} cannot be negative")
+    return value
+
+
 def _parse_inputs() -> tuple[LifetimeInputs, dict]:
     """Query string -> LifetimeInputs (SI). Returns the echo dict too."""
     address = (request.args.get("address") or DEFAULTS["address"]).strip()
@@ -143,8 +159,12 @@ def _parse_inputs() -> tuple[LifetimeInputs, dict]:
             geometry=geometry, f_cold=f_cold, f_warm=f_warm, u_assembly=u_si,
             t_room_c=psychro.f_to_c(_float("t_in", DEFAULTS["t_in_f"], 40.0, 100.0)),
             rh_room=_float("rh_in", DEFAULTS["rh_in_pct"], 0.0, 100.0) / 100.0,
-            ach_out=_ach("ach_out", ACH_OUT_PRESETS, DEFAULTS["ach_out"]),
-            ach_in=_ach("ach_in", ACH_IN_PRESETS, DEFAULTS["ach_in"]),
+            # Raw ACH is an advanced override; the normal path is rated leakage.
+            al_out=None if request.args.get("ach_out") else _leak("al_out", EXISTING_BY_KEY, DEFAULTS["al_out"]),
+            al_in=None if request.args.get("ach_in") else _leak("al_in", RETROFIT_BY_KEY, DEFAULTS["al_in"]),
+            ach_out=_ach("ach_out", {}, "0") if request.args.get("ach_out") else 0.0,
+            ach_in=_ach("ach_in", {}, "0") if request.args.get("ach_in") else 0.0,
+            dp_pa=_float("dp_pa", DEFAULTS["dp_pa"], 0.0, 75.0),
             wind_scaling=_bool("wind_scaling", True),
             desiccant_grams=_float("grams", DEFAULTS["grams"], 0.0, 100000.0),
             desiccant_key=desiccant,
@@ -167,7 +187,8 @@ def _parse_inputs() -> tuple[LifetimeInputs, dict]:
         "f_cold": f_cold, "f_warm": round(f_warm, 4),
         "u_ip": round(psychro.u_si_to_ip(u_si), 4), "r_ip": round(psychro.r_si_to_ip(r_si), 4),
         "t_in_f": round(psychro.c_to_f(inp.t_room_c), 2), "rh_in_pct": inp.rh_room * 100.0,
-        "ach_out": inp.ach_out, "ach_in": inp.ach_in, "wind_scaling": inp.wind_scaling,
+        "al_out": inp.al_out, "al_in": inp.al_in, "dp_pa": inp.dp_pa,
+        "ach_out": round(inp.ach_out, 4), "ach_in": round(inp.ach_in, 4), "wind_scaling": inp.wind_scaling,
         "grams": inp.desiccant_grams, "desiccant": desiccant, "tau_h": inp.tau,
         "desorption": inp.allow_desorption, "full_fraction": inp.full_fraction,
         "pane_coupling": inp.pane_coupling, "absorptance": inp.absorptance,
@@ -259,8 +280,9 @@ def _result_payload(r: LifetimeResult, echo: dict, location, weather, cached: bo
 ASSUMPTIONS = [
     "3A isotherm constants are fitted to published vendor curves, not to a supplier sheet.",
     "Desiccant time constant (default 2 h) is an estimate; a vendor can measure it.",
-    "ACH preset values are order-of-magnitude anchors, not measurements.",
-    "Outdoor leakage scales with wind as v^1.3 with a 0.3 floor at calm (toggle).",
+    "Leakage presets: AERC baseline (2.0) and best certified insert (0.06 cfm/ft2) are published; the values between are estimates.",
+    "Cavity ACH from rated leakage assumes an operating pressure (default 3 Pa) and the 0.65 crack-flow exponent; uncertainty about a factor of 3.",
+    "Wind adds 0.5 rho v^2 Cp (Cp 0.6) to the outdoor path's operating pressure (toggle).",
     "Pane warming from vent air is an upper bound.",
     "Evaporation from the pane is instantaneous up to saturation (upper bound on drying).",
     "Retained film cap 100 um; visible threshold 5 um; both unmeasured.",
@@ -288,8 +310,13 @@ def presets():
     return jsonify({
         "app": APP_NAME, "version": APP_VERSION,
         "defaults": DEFAULTS,
-        "ach_out": [{"key": k, "value": v, "label": ACH_OUT_LABELS[k]} for k, v in ACH_OUT_PRESETS.items()],
-        "ach_in": [{"key": k, "value": v, "label": ACH_IN_LABELS[k]} for k, v in ACH_IN_PRESETS.items()],
+        "al_out": [asdict(p) for p in EXISTING_PRESETS],
+        "al_in": [asdict(p) for p in RETROFIT_PRESETS],
+        "leakage_reference": {
+            "test_pressure_pa": 75.0, "flow_exponent": 0.65, "default_operating_pa": DEFAULT_OPERATING_PA,
+            "aerc_url": "https://aercenergyrating.org/product-search/commercial-product-search/",
+            "note": "Air leakage in cfm/ft2 at 75 Pa per ASTM E283 / AERC. Cavity ACH = AL x 18.29 x (dP/75)^0.65 / offset.",
+        },
         "desiccants": [
             {
                 "key": d.key, "name": d.name, "q_max_25": d.q_max_25, "tau_hours": d.tau_hours,

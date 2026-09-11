@@ -151,8 +151,8 @@ export default function Explain({ result, presets, inp }) {
         <Step title="2. Two air streams feed it" figure={<FigStreams aOut={i?.ach_out ?? '—'} aIn={i?.ach_in ?? '—'} />}>
           <p>Outdoor air leaks in through the existing window; room air enters through the retrofit's vent or perimeter. Each is an air change rate. The cavity relaxes toward the flow-weighted supply humidity with an exact exponential, so no step size can overshoot.</p>
           <div className="formula">{`dW/dt = ACH_out (W_out − W) + ACH_in (W_room − W)\nW_supply = (ACH_out·W_out + ACH_in·W_room) / (ACH_out + ACH_in)\nW(t+dt) = W_supply + (W − W_supply) · exp(−(ACH_out + ACH_in)·dt)`}</div>
-          <p>Outdoor leakage scales with wind as v^1.3 (pressure goes with v², crack flow with pressure^0.65), with a 0.3 floor in calm air for stack effect. In winter, outdoor air is cold but dry; room air is the wetter stream.</p>
-          {i && <Live rows={[['Total exchange', `${fmt.n(aTot, 3)} ACH`], ['Air through the cavity per hour', `${fmt.n(aTot * airKg * 1000, 1)} g`], ['Water delivered per hour at 3 g/kg supply', `${fmt.n(aTot * airKg * 3, 3)} g`]]} />}
+          <p>Each rate comes from a rated air leakage (cfm/ft² at 75 Pa, the AERC and ASTM E283 number) scaled to the few pascals a cavity actually sees: ACH = AL × 18.29 × (ΔP/75)^0.65 / offset. Wind adds ½ρv²·C_p to the outdoor path's pressure hour by hour. A deeper cavity dilutes the same crack flow into more air, so ACH falls in proportion to offset. In winter, outdoor air is cold but dry; room air is the wetter stream.</p>
+          {i && <Live rows={[['Existing window', `${i.al_out ?? '—'} cfm/ft² → ${fmt.g(i.ach_out)} ACH`], ['Retrofit', `${i.al_in ?? '—'} cfm/ft² → ${fmt.g(i.ach_in)} ACH`], ['Operating pressure', `${i.dp_pa} Pa`], ['Total exchange', `${fmt.g(aTot)} ACH`], ['Air through the cavity per hour', `${fmt.n(aTot * airKg * 1000, 1)} g`], ['Water delivered per hour at 3 g/kg supply', `${fmt.n(aTot * airKg * 3, 3)} g`]]} />}
         </Step>
 
         <Step title="3. The existing pane's temperature" figure={<FigEnergy />}>

@@ -33,8 +33,9 @@ def client(monkeypatch, year):
 
 def test_presets_shape(client):
     d = client.get("/api/presets").get_json()
-    assert d["defaults"]["ach_out"] == "sealed" and d["defaults"]["ach_in"] == "sealed"
-    assert {p["key"] for p in d["ach_out"]} >= {"weathered", "sealed", "hermetic"}
+    assert d["defaults"]["al_out"] == "resealed" and d["defaults"]["al_in"] == "certified_best"
+    assert [p["key"] for p in d["al_out"]][0] == "new_fixed" and [p["key"] for p in d["al_in"]][0] == "igu_grade"
+    assert d["leakage_reference"]["aerc_url"].startswith("https://aercenergyrating.org")
     assert d["desiccants"][0]["key"] == "ms3a"
     assert "desiccant_grams" in d["sweepable"]
 
@@ -43,7 +44,10 @@ def test_lifetime_defaults(client):
     d = client.get("/api/lifetime").get_json()
     h = d["headline"]
     assert h["exhausted_hour"] is not None and h["hours_per_gram"] > 0
-    assert d["inputs"]["ach_out"] == 0.02 and d["inputs"]["ach_in"] == 0.1
+    assert d["inputs"]["al_out"] == 0.10 and d["inputs"]["al_in"] == 0.06 and d["inputs"]["dp_pa"] == 3.0
+    # derived: AL x 18.29 x (3/75)^0.65 / 0.0153 m
+    assert d["inputs"]["ach_out"] == pytest.approx(0.10 * 18.29 * (3 / 75) ** 0.65 / (0.6024 * 0.0254), rel=1e-3)
+    assert d["inputs"]["ach_in"] == pytest.approx(0.06 * 18.29 * (3 / 75) ** 0.65 / (0.6024 * 0.0254), rel=1e-3)
     assert d["inputs"]["capacity_g"] == pytest.approx(10.5)
     assert len(d["year1"]["loading_pct"]) == 8760
     assert len(d["daily"]["loading"]) == 365
@@ -64,12 +68,20 @@ def test_lifetime_more_grams_lasts_longer(client):
 
 
 def test_lifetime_preset_names_and_numbers(client):
-    a = client.get("/api/lifetime?ach_out=hermetic&trace=0").get_json()["inputs"]["ach_out"]
-    b = client.get("/api/lifetime?ach_out=0.002&trace=0").get_json()["inputs"]["ach_out"]
-    assert a == b == 0.002
+    a = client.get("/api/lifetime?al_out=baseline&trace=0").get_json()["inputs"]
+    b = client.get("/api/lifetime?al_out=2.0&trace=0").get_json()["inputs"]
+    assert a["al_out"] == b["al_out"] == 2.0 and a["ach_out"] == b["ach_out"]
 
 
-@pytest.mark.parametrize("q", ["f_cold=1.5", "grams=-1", "ach_in=lots", "desiccant=silica",
+def test_raw_ach_override_and_offset_dilution(client):
+    raw = client.get("/api/lifetime?ach_out=1.0&ach_in=0.5&trace=0").get_json()["inputs"]
+    assert raw["al_out"] is None and raw["ach_out"] == 1.0 and raw["ach_in"] == 0.5
+    thin = client.get("/api/lifetime?offset_in=0.6&trace=0").get_json()["inputs"]["ach_in"]
+    deep = client.get("/api/lifetime?offset_in=2.4&trace=0").get_json()["inputs"]["ach_in"]
+    assert thin == pytest.approx(4 * deep, rel=1e-3)          # same crack flow, 4x the air
+
+
+@pytest.mark.parametrize("q", ["f_cold=1.5", "grams=-1", "al_in=lots", "ach_in=-1", "dp_pa=-1", "desiccant=silica",
                                "orientation=up", "offset_in=0"])
 def test_lifetime_rejects_bad_input(client, q):
     assert client.get("/api/lifetime?" + q).status_code == 400
@@ -84,6 +96,9 @@ def test_sweep_1d(client):
 
 def test_sweep_2d_user_units(client):
     d = client.get("/api/sweep?x_key=desiccant_grams&x_values=20,100&y_key=t_room_c&y_values=65,75").get_json()
+    e = client.get("/api/sweep?x_key=al_in&x_values=0.01,0.06,0.3&trace=0").get_json()
+    hrs = [p["exhausted_hour"] for p in e["points"]]
+    assert hrs == sorted(hrs, reverse=True)                     # tighter retrofit, longer life
     assert d["mode"] == "2d" and d["y_values"] == [65, 75]
     assert d["grid"][1][1]["y"] == 75 and d["grid"][0][1]["x"] == 100
 
