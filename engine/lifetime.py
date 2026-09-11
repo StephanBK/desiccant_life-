@@ -410,9 +410,10 @@ def run_lifetime(
                     first_cond_hour = hours_run - 1
             if film > inp.visible_film_kg:
                 y_hv += 1
-            # Below ~1e-6 kg/kg (dew point near -75 degC) the solver has
-            # nothing to solve; a fresh sieve gets there in hours.
-            dp = dew_point_from_w(w_cav, p_atm_pa=p_atm) if w_cav > 1e-6 else -75.0
+            # A fresh sieve drives W toward zero within hours. Dew point is
+            # floored at -40 (same in degC and degF) for the charts; below
+            # that the number carries no information.
+            dp = max(-40.0, dew_point_from_w(w_cav, p_atm_pa=p_atm)) if w_cav > 1e-6 else -40.0
             y_dp += dp
             rh_eq = des.rh_eq(q, t_air) if m_des > 0 else 1.0
 
