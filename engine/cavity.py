@@ -308,6 +308,8 @@ def vent_cold_surface_rise(
     g_in = u_assembly / (1.0 - f_cold)
     m_dot = ach * gap_m * dry_air_density(t_cold_c) / 3600.0
     c_vent = m_dot * CP_AIR
+    if c_vent <= 0.0:
+        return 0.0
     g_vent = 1.0 / (1.0 / c_vent + 1.0 / h_cold)
     return g_vent * (t_room_c - t_cold_c) / (g_out + g_in + g_vent)
 
@@ -354,9 +356,9 @@ def vent_cold_surface_rise_two_path(
     rho = dry_air_density(t_cold_c)
 
     def g_vent(ach: float) -> float:
-        if ach <= 0.0:
-            return 0.0
         c = ach * gap_m * rho / 3600.0 * CP_AIR
+        if c <= 0.0:                       # zero or underflowed flow: no path
+            return 0.0
         return 1.0 / (1.0 / c + 1.0 / h_cold)
 
     g_iv, g_ov = g_vent(ach_in), g_vent(ach_out)

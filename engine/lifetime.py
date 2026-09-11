@@ -502,6 +502,8 @@ def run_lifetime(
     # Grams are per WINDOW; the moisture engine works per m2 of glass.
     area = inp.geometry.glazing_area_m2
     m_des = inp.desiccant_grams / 1000.0 / area          # kg desiccant per m2 of glass
+    if inp.desiccant_grams < 1e-9:                        # nothing measurable: run without
+        m_des = 0.0
     tau = inp.tau
     q_full = inp.full_fraction * des.q_max(25.0)
     p_atm = atmospheric_pressure_pa(weather.elevation_m)
@@ -600,7 +602,7 @@ def run_lifetime(
             break
 
     hpg = None
-    if exhausted_hour is not None and inp.desiccant_grams > 0:
+    if exhausted_hour is not None and m_des > 0.0:
         hpg = exhausted_hour / inp.desiccant_grams
 
     return LifetimeResult(

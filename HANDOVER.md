@@ -5,7 +5,10 @@ deployed.
 
 ## Where things stand
 
-- Engine, API, frontend all in this repo. 237 tests pass.
+- Engine, API, frontend all in this repo. 261 tests: 243 unit/API,
+  5 engine-vs-reference cross-checks, 13 hypothesis property tests
+  (40 random examples each). Full suite ~2.5 min; run the properties
+  and cross-check separately if the 300 s CI limit bites.
 - Frontend is built and committed in `static/dist`, so Railway builds
   with Nixpacks (Python only) and serves it. Rebuild with
   `cd frontend && npm run build` after any frontend change and commit
@@ -71,6 +74,11 @@ error budget and the cross-check.
 - Consider persisting the NSRDB cache on a Railway volume.
 
 ## Conventions
+
+- Any physics change: rerun `python xcheck.py` style matrix (AUDIT.md
+  section 2) and update the table.
+- Property tests found three real edge cases and two invariants that
+  were stated too strongly (see docstrings in tests/test_properties.py).
 
 - SI inside the engine, US customary at the API boundary and UI.
 - Every estimate carries an ESTIMATE label in code and UI.
