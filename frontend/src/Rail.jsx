@@ -5,7 +5,7 @@ function Num({ label, k, inp, set, step = 1, min, max, unit, tip = k }) {
   return (
     <div className="field">
       <label htmlFor={k}>{label}{unit && <> <span className="unit">{unit}</span></>} <Tip id={tip} /></label>
-      <input id={k} type="number" step={step} min={min} max={max} value={inp[k]} onChange={(e) => set(k, e.target.value === '' ? '' : Number(e.target.value))} />
+      <input id={k} type="number" step="any" min={min} max={max} value={inp[k]} onChange={(e) => set(k, e.target.value === '' ? '' : Number(e.target.value))} />
     </div>
   )
 }
@@ -27,7 +27,7 @@ function Ladder({ k, inp, set, presets, note }) {
       </div>
       <div className="field">
         <label>Air leakage <span className="unit">cfm/ft² at 75 Pa</span> <Tip id={k} /></label>
-        <input type="number" step="0.01" min="0" value={value} onChange={(e) => set(k, Number(e.target.value))} />
+        <input type="number" step="any" min="0" value={value} onChange={(e) => set(k, Number(e.target.value))} />
       </div>
       <div className="field derived">
         <label>Cavity air changes <span className="unit">derived</span> <Tip id="ach_derived" /></label>
