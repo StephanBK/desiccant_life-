@@ -48,7 +48,7 @@ def test_lifetime_defaults(client):
     # derived: AL x 18.29 x (3/75)^0.65 / 0.0153 m
     assert d["inputs"]["ach_out"] == pytest.approx(0.10 * 18.29 * (3 / 75) ** 0.65 / (0.6024 * 0.0254), rel=1e-3)
     assert d["inputs"]["ach_in"] == pytest.approx(0.06 * 18.29 * (3 / 75) ** 0.65 / (0.6024 * 0.0254), rel=1e-3)
-    assert d["inputs"]["capacity_g"] == pytest.approx(10.5)
+    assert d["inputs"]["capacity_g"] == pytest.approx(210.0)
     assert len(d["year1"]["loading_pct"]) == 8760
     assert len(d["daily"]["loading"]) == 365
     assert d["year1"]["loading_pct"][-1] <= 100.0

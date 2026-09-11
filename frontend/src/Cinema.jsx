@@ -99,7 +99,7 @@ export default function Cinema({ result, active }) {
   return (
     <div className="cinema" ref={stage}>
       <div className="cin-top">
-        <div className="cin-brand">INOVUES<span>Desiccant lifetime</span></div>
+        <div className="cin-brand"><img className="mark" src="/inovues-mark.png" alt="INOVUES" /><div><img className="word" src="/inovues-wordmark.png" alt="" /><span>Desiccant lifetime</span></div></div>
         <div className="cin-date"><span className="cin-year">Year {year}</span><span>{date}</span></div>
         <div className="cin-actions">
           <button className="cin-btn" onClick={() => setPlaying((p) => !p)}>{playing ? 'Pause' : 'Play'}</button>
@@ -130,7 +130,7 @@ export default function Cinema({ result, active }) {
             <rect x={VX} y={VY} width={VW} height={VH} rx="18" fill="url(#glass)" pointerEvents="none" />
             {/* incoming moisture: drifting motes whose count follows exchange rate */}
             {playing && !isFull && Array.from({ length: Math.min(14, Math.round(Math.log10(1 + (inp.ach_out + inp.ach_in)) * 6)) }, (_, i) => (
-              <circle key={`m${i}`} className="mote" style={{ animationDelay: `${(i * 0.37) % 2.6}s`, animationDuration: `${2.2 + (i % 4) * 0.4}s` }} cx={VX - 20} cy={VY + 30 + (i * 37) % (VH - 60)} r="2.2" fill="#1f9e9a" filter="url(#glow)" />
+              <circle key={`m${i}`} className="mote" style={{ animationDelay: `${(i * 0.37) % 2.6}s`, animationDuration: `${2.2 + (i % 4) * 0.4}s` }} cx={VX - 20} cy={VY + 30 + (i * 37) % (VH - 60)} r="2.2" filter="url(#glow)" />
             ))}
           </svg>
           <div className="cin-gauge">

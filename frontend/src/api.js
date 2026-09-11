@@ -9,7 +9,7 @@ export const DEFAULT_INPUTS = {
   t_in: 70, rh_in: 35,
   al_out: 'resealed', al_in: 'certified_best', dp_pa: 3,
   wind_scaling: true,
-  grams: 50, desiccant: 'ms3a', tau_h: '',
+  grams: 1000, desiccant: 'ms3a', tau_h: '',
   desorption: false, full_fraction: 0.95,
   pane_coupling: true, absorptance: 0.10, sky_radiation: true,
   max_years: 20, visible_um: 5,

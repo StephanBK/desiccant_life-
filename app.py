@@ -54,7 +54,7 @@ DEFAULTS = {
     "f_cold": 0.30, "u_ip": 0.30, "r_ip": 0.97,
     "t_in_f": 70.0, "rh_in_pct": 35.0,
     "al_out": "resealed", "al_in": "certified_best", "dp_pa": DEFAULT_OPERATING_PA,
-    "grams": 50.0, "desiccant": DEFAULT_DESICCANT,
+    "grams": 1000.0, "desiccant": DEFAULT_DESICCANT,
     "orientation": "south", "absorptance": 0.10,
 }
 

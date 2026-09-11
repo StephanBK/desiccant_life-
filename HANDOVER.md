@@ -15,7 +15,8 @@ locally; v0.1 is on GitHub (StephanBK/desiccant_life-), v0.2 not yet pushed.
   the result.
 - Default scenario on first load (decided 2026-09-10): outdoor
   "sealed" 0.02 ACH (freshly resealed old facade), room "sealed"
-  0.1 ACH (tight retrofit), 50 g 3A, 277 Park, 60 x 96 x 0.6 in.
+  0.1 ACH (tight retrofit), 1,000 g 3A (raised from 50 g on
+  2026-09-11 so the first impression is not "hours"), 277 Park, 60 x 96 x 0.6 in.
 
 ## Deploy to Railway (first time)
 
@@ -33,7 +34,9 @@ property tests, rail + tooltips, cinematic tab. All done. See AUDIT.md.
 - Watch tab (Cinema.jsx): dark stage, vessel of 240 beads filling day by
   day over the whole run, saturation gauge, outdoor and pane cues, the
   two milestones, first-fog flash, timeline with markers, fullscreen.
-  Auto-plays on opening the tab. No logo asset yet: wordmark only.
+  Auto-plays on opening the tab. Logo: frontend/public/inovues-logo.png
+  (mark + wordmark split into inovues-mark.png / inovues-wordmark.png);
+  brand teal #138fa3 is --water / --brand in index.css.
 - Tooltips: engineering register (decision 2026-09-11), inputs and outputs.
 - Rail closed on first load with a summary strip.
 

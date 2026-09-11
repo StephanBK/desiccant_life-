@@ -34,7 +34,7 @@ export default function App() {
   return (
     <div className="shell">
       <header className="topbar">
-        <div className="brand"><span className="mark" />Desiccant Lifetime<small>INOVUES</small></div>
+        <div className="brand"><img className="mark" src="/inovues-mark.png" alt="INOVUES" /><img className="word" src="/inovues-wordmark.png" alt="" /><small>Desiccant Lifetime</small></div>
         <nav className="tabs" role="tablist">
           {TABS.map(([k, label]) => (
             <button key={k} role="tab" className="tab" aria-selected={tab === k} onClick={() => setTab(k)}>{label}</button>
