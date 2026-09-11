@@ -1,9 +1,10 @@
 import { achFromAL, fmt } from './api.js'
+import { Tip } from './Tip.jsx'
 
-function Num({ label, k, inp, set, step = 1, min, max, unit }) {
+function Num({ label, k, inp, set, step = 1, min, max, unit, tip = k }) {
   return (
     <div className="field">
-      <label htmlFor={k}>{label}{unit && <> <span className="unit">{unit}</span></>}</label>
+      <label htmlFor={k}>{label}{unit && <> <span className="unit">{unit}</span></>} <Tip id={tip} /></label>
       <input id={k} type="number" step={step} min={min} max={max} value={inp[k]} onChange={(e) => set(k, e.target.value === '' ? '' : Number(e.target.value))} />
     </div>
   )
@@ -25,11 +26,11 @@ function Ladder({ k, inp, set, presets, note }) {
         ))}
       </div>
       <div className="field">
-        <label>Air leakage <span className="unit">cfm/ft² at 75 Pa</span></label>
+        <label>Air leakage <span className="unit">cfm/ft² at 75 Pa</span> <Tip id={k} /></label>
         <input type="number" step="0.01" min="0" value={value} onChange={(e) => set(k, Number(e.target.value))} />
       </div>
       <div className="field derived">
-        <label>Cavity air changes <span className="unit">derived</span></label>
+        <label>Cavity air changes <span className="unit">derived</span> <Tip id="ach_derived" /></label>
         <output>{Number.isFinite(ach) ? `${fmt.g(ach)} ACH` : ''}</output>
       </div>
       <p className="hint">{sel ? sel.source : 'Custom value.'} {note}</p>
@@ -39,21 +40,22 @@ function Ladder({ k, inp, set, presets, note }) {
 
 function Check({ label, k, inp, set }) {
   return (
-    <label className="check"><input type="checkbox" checked={!!inp[k]} onChange={(e) => set(k, e.target.checked)} />{label}</label>
+    <div className="check"><label><input type="checkbox" checked={!!inp[k]} onChange={(e) => set(k, e.target.checked)} />{label}</label> <Tip id={k} /></div>
   )
 }
 
-export default function Rail({ inp, set, presets, busy, onRun }) {
+export default function Rail({ inp, set, presets, busy, onRun, onClose }) {
   const volumeL = (inp.width_in * inp.height_in * inp.offset_in * 16.387) / 1000
   const des = presets?.desiccants?.find((d) => d.key === inp.desiccant)
   const capG = des ? inp.grams * des.q_max_25 : null
   return (
     <aside className="rail">
       <form onSubmit={(e) => { e.preventDefault(); onRun() }}>
+        <div className="rail-head"><span>Inputs</span><button type="button" className="btn small" onClick={onClose}>Hide</button></div>
         <div className="group">
           <h3>Location</h3>
-          <div className="field wide"><input type="text" value={inp.address} onChange={(e) => set('address', e.target.value)} aria-label="Address" /></div>
-          <div className="field"><label>Facade faces</label>
+          <div className="field wide"><label htmlFor="address">Address <Tip id="address" /></label><input id="address" type="text" value={inp.address} onChange={(e) => set('address', e.target.value)} /></div>
+          <div className="field"><label>Facade faces <Tip id="orientation" /></label>
             <select value={inp.orientation} onChange={(e) => set('orientation', e.target.value)}>
               {(presets?.orientations || ['south']).map((o) => <option key={o} value={o}>{o}</option>)}
             </select></div>
@@ -92,7 +94,7 @@ export default function Rail({ inp, set, presets, busy, onRun }) {
 
         <div className="group">
           <h3>Desiccant<span>{capG !== null ? `holds ${fmt.n(capG, 1)} g of water` : ''}</span></h3>
-          <div className="field"><label>Type</label>
+          <div className="field"><label>Type <Tip id="desiccant" /></label>
             <select value={inp.desiccant} onChange={(e) => set('desiccant', e.target.value)}>
               {(presets?.desiccants || []).map((d) => <option key={d.key} value={d.key}>{d.name}</option>)}
             </select></div>

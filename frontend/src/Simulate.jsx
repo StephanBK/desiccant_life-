@@ -4,14 +4,25 @@ import {
 } from 'recharts'
 import Cavity from './Cavity.jsx'
 import { fmt } from './api.js'
+import { Tip } from './Tip.jsx'
 
 const C = { glass: '#1f5fa8', water: '#1f9e9a', fog: '#d0642f', sand: '#9a7330', cold: '#6e8fb5', ink3: '#8592a6' }
 
-function Stat({ cls, value, unit, label, sub }) {
+function Row({ label, value, color, tip }) {
+  return (
+    <div className="row">
+      <span>{color && <i className="dot" style={{ background: color }} />}{label}</span>
+      <b>{value}</b>
+      {tip && <Tip id={tip} />}
+    </div>
+  )
+}
+
+function Stat({ cls, value, unit, label, sub, tip }) {
   return (
     <div className={`stat ${cls}`}>
       <div className="value">{value}{unit && <small>{unit}</small>}</div>
-      <div className="label">{label}</div>
+      <div className="label">{label}{tip && <Tip id={tip} inline />}</div>
       {sub && <div className="sub">{sub}</div>}
     </div>
   )
@@ -22,26 +33,28 @@ function Headline({ h, inputs, unit, setUnit }) {
   const show = (hours) => hours === null ? null : fmt.n(hours / div, hours / div < 10 ? 2 : 1)
   const ex = show(h.exhausted_hour), fc = show(h.first_condensation_hour)
   return (
-    <div className="headline">
-      <div className="unit-toggle" role="group" aria-label="Time unit">
+    <>
+    <div className="unit-row"><span className="hint">Show durations in</span><div className="unit-toggle" role="group" aria-label="Time unit">
         {['months', 'years'].map((u) => <button key={u} className="btn small" aria-pressed={unit === u} onClick={() => setUnit(u)}>{u}</button>)}
-      </div>
-      <Stat cls="sand"
+      </div></div>
+    <div className="headline">
+      <Stat cls="sand" tip="out_full"
         value={ex ?? (h.capped ? `> ${fmt.n(h.years_run * 8760 / div, 0)}` : 'never')}
         unit={unit}
         label={`${fmt.n(inputs.grams)} g of ${inputs.desiccant === 'ms3a' ? '3A sieve' : inputs.desiccant} lasts`}
         sub={ex ? `full after ${fmt.n(h.exhausted_hour)} hours (${fmt.n(h.exhausted_hour / 24, 1)} days); holds ${fmt.n(inputs.capacity_g, 1)} g of water` : `run capped at ${h.years_run} years, loading ${h.final_loading_pct_of_max}%`} />
-      <Stat cls="fog"
+      <Stat cls="fog" tip="out_fog"
         value={fc ?? 'none'}
         unit={fc ? unit : ''}
         label="until the pane first fogs"
         sub={fc ? `hour ${fmt.n(h.first_condensation_hour)} (${fmt.n(h.first_condensation_hour / 24, 1)} days), ${fmt.clock(h.first_condensation_hour)}` : `no condensation in ${h.years_run} year${h.years_run > 1 ? 's' : ''}`} />
-      <Stat cls="glass"
+      <Stat cls="glass" tip="out_hpg"
         value={h.hours_per_gram !== null ? fmt.n(h.hours_per_gram, h.hours_per_gram < 10 ? 2 : 0) : '—'}
         unit={h.hours_per_gram !== null ? 'h / g' : ''}
         label="hours of protection per gram"
         sub={h.hours_per_gram !== null ? `${fmt.n(8760 / h.hours_per_gram)} g for one year at this leakage` : 'not exhausted, so unbounded here'} />
     </div>
+    </>
   )
 }
 
@@ -100,16 +113,16 @@ function Animation({ y1, inputs, headline }) {
             <div className="speed">{[12, 48, 168, 720].map((s) => <button key={s} className="btn small" aria-pressed={speed === s} onClick={() => setSpeed(s)} style={speed === s ? { borderColor: C.glass, color: C.glass } : {}}>{s === 12 ? '½ day/s' : s === 48 ? '2 days/s' : s === 168 ? 'week/s' : 'month/s'}</button>)}</div>
           </div>
           <div className="readout">
-            <div><span><i className="dot" style={{ background: C.cold }} />pane</span><b>{frame.t_cold_f?.toFixed(1)} °F</b></div>
-            <div><span><i className="dot" style={{ background: C.water }} />cavity dew point</span><b>{frame.dew_cav_f?.toFixed(1)} °F</b></div>
-            <div><span>cavity RH</span><b>{frame.rh_cav_pct?.toFixed(1)} %</b></div>
-            <div><span>supply air</span><b>{frame.w_supply_gkg?.toFixed(2)} g/kg</b></div>
-            <div><span><i className="dot" style={{ background: C.sand }} />sieve loading</span><b>{frame.loading_pct?.toFixed(1)} %</b></div>
-            <div><span>sieve holds air at</span><b>{frame.rh_eq_pct?.toFixed(2)} % RH</b></div>
-            <div><span>taken up this hour</span><b>{(frame.uptake_g * 1000)?.toFixed(1)} mg</b></div>
-            <div><span><i className="dot" style={{ background: C.fog }} />film on pane</span><b>{frame.film_um?.toFixed(2)} µm</b></div>
-            <div><span>vent warming</span><b>{frame.vent_rise_f?.toFixed(2)} °F</b></div>
-            <div><span>outdoor leakage now</span><b>{frame.ach_out?.toFixed(3)} ACH</b></div>
+            <Row label="pane" color={C.cold} tip="out_pane" value={`${frame.t_cold_f?.toFixed(1)} °F`} />
+            <Row label="cavity dew point" color={C.water} tip="out_dew" value={`${frame.dew_cav_f?.toFixed(1)} °F`} />
+            <Row label="cavity RH" tip="out_rh" value={`${frame.rh_cav_pct?.toFixed(1)} %`} />
+            <Row label="supply air" tip="out_supply" value={`${frame.w_supply_gkg?.toFixed(2)} g/kg`} />
+            <Row label="sieve loading" color={C.sand} tip="out_loading" value={`${frame.loading_pct?.toFixed(1)} %`} />
+            <Row label="sieve holds air at" tip="out_rheq" value={`${frame.rh_eq_pct?.toFixed(2)} % RH`} />
+            <Row label="taken up this hour" tip="out_uptake" value={`${(frame.uptake_g * 1000)?.toFixed(1)} mg`} />
+            <Row label="film on pane" color={C.fog} tip="out_film" value={`${frame.film_um?.toFixed(2)} µm`} />
+            <Row label="vent warming" tip="out_vent" value={`${frame.vent_rise_f?.toFixed(2)} °F`} />
+            <Row label="outdoor leakage now" tip="out_achout" value={`${frame.ach_out?.toFixed(3)} ACH`} />
           </div>
         </div>
         <div>
