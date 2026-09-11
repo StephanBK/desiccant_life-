@@ -4,7 +4,7 @@
 export const DEFAULT_INPUTS = {
   address: '277 Park Avenue, New York, NY',
   orientation: 'south',
-  width_in: 60, height_in: 96, offset_in: 0.6024,
+  width_in: 60, height_in: 96, offset_in: 0.6,
   f_cold: 0.30, u_ip: 0.30, r_ip: 0.97, f_warm: '',
   t_in: 70, rh_in: 35,
   al_out: 'resealed', al_in: 'certified_best', dp_pa: 3,

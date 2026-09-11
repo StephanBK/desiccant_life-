@@ -28,7 +28,7 @@ export const TIPS = {
   offset_in: {
     what: 'Air gap between the existing pane and the retrofit IGU, inches.',
     how: 'Cavity volume per m² = offset. Sets air mass (m_cav) and converts rated leakage to ACH (ACH = flow / offset). It does NOT change desiccant life: crack flow per m² of window is fixed by the rating, so a deeper cavity has lower ACH but the same water arriving per hour.',
-    src: 'Default 0.6024 in (15.3 mm), the ANLY-002 reference. Offset invariance is tested (test_properties::test_offset_does_not_change_fill_time).',
+    src: 'Default 0.6 in (15.2 mm), close to the ANLY-002 reference of 0.6024 in. Offset invariance is tested (test_properties::test_offset_does_not_change_fill_time).',
   },
   f_cold: {
     what: 'Temperature factor of the existing pane\'s cavity-side face: f = (T_surface − T_out) / (T_room − T_out), dimensionless, 0 = at outdoor temperature.',

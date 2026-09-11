@@ -33,7 +33,7 @@ function Ladder({ k, inp, set, presets, note }) {
         <label>Cavity air changes <span className="unit">derived</span> <Tip id="ach_derived" /></label>
         <output>{Number.isFinite(ach) ? `${fmt.g(ach)} ACH` : ''}</output>
       </div>
-      <p className="hint">{sel ? sel.source : 'Custom value.'} {note}</p>
+      <p className="hint">{sel ? sel.source.replace(/\.?$/, '.') : 'Custom value.'} {note}</p>
     </>
   )
 }

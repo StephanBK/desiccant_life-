@@ -50,7 +50,7 @@ app = Flask(__name__, static_folder=DIST, static_url_path="")
 # (cfm/ft2 at 75 Pa) since Sep 11 2026; see engine/leakage.py.
 DEFAULTS = {
     "address": "277 Park Avenue, New York, NY",
-    "width_in": 60.0, "height_in": 96.0, "offset_in": 0.6024,
+    "width_in": 60.0, "height_in": 96.0, "offset_in": 0.6,
     "f_cold": 0.30, "u_ip": 0.30, "r_ip": 0.97,
     "t_in_f": 70.0, "rh_in_pct": 35.0,
     "al_out": "resealed", "al_in": "certified_best", "dp_pa": DEFAULT_OPERATING_PA,
