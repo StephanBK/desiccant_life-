@@ -286,7 +286,8 @@ ASSUMPTIONS = [
     "Pane warming from vent air is an upper bound.",
     "Evaporation from the pane is instantaneous up to saturation (upper bound on drying).",
     "Retained film cap 100 um; visible threshold 5 um; both unmeasured.",
-    "'Exhausted' = 95 % of 25 degC capacity; a Langmuir sieve never reaches 100 %.",
+    "'Exhausted' = 95 % of 25 degC capacity; at 35 % room RH the sieve equilibrates at 96.7 %, so thresholds above that never fire.",
+    "Leakage paths are treated as independent at the same operating pressure; a single-sided stack loop estimate gives about half the exchange, so supply is likely overestimated by ~2x (conservative on life).",
     "TMY year repeated; no climate trend, no year-to-year variation.",
 ]
 

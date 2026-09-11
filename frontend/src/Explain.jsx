@@ -151,7 +151,7 @@ export default function Explain({ result, presets, inp }) {
         <Step title="2. Two air streams feed it" figure={<FigStreams aOut={i?.ach_out ?? '—'} aIn={i?.ach_in ?? '—'} />}>
           <p>Outdoor air leaks in through the existing window; room air enters through the retrofit's vent or perimeter. Each is an air change rate. The cavity relaxes toward the flow-weighted supply humidity with an exact exponential, so no step size can overshoot.</p>
           <div className="formula">{`dW/dt = ACH_out (W_out − W) + ACH_in (W_room − W)\nW_supply = (ACH_out·W_out + ACH_in·W_room) / (ACH_out + ACH_in)\nW(t+dt) = W_supply + (W − W_supply) · exp(−(ACH_out + ACH_in)·dt)`}</div>
-          <p>Each rate comes from a rated air leakage (cfm/ft² at 75 Pa, the AERC and ASTM E283 number) scaled to the few pascals a cavity actually sees: ACH = AL × 18.29 × (ΔP/75)^0.65 / offset. Wind adds ½ρv²·C_p to the outdoor path's pressure hour by hour. A deeper cavity dilutes the same crack flow into more air, so ACH falls in proportion to offset. In winter, outdoor air is cold but dry; room air is the wetter stream.</p>
+          <p>Each rate comes from a rated air leakage (cfm/ft² at 75 Pa, the AERC and ASTM E283 number) scaled to the few pascals a cavity actually sees: ACH = AL × 18.29 × (ΔP/75)^0.65 / offset. Wind adds ½ρv²·C_p to the outdoor path's pressure hour by hour. A deeper cavity dilutes the same crack flow into more air, so ACH falls in proportion to offset, but the water arriving per hour does not change, so desiccant life does not either. In winter, outdoor air is cold but dry; room air is the wetter stream.</p>
           {i && <Live rows={[['Existing window', `${i.al_out ?? '—'} cfm/ft² → ${fmt.g(i.ach_out)} ACH`], ['Retrofit', `${i.al_in ?? '—'} cfm/ft² → ${fmt.g(i.ach_in)} ACH`], ['Operating pressure', `${i.dp_pa} Pa`], ['Total exchange', `${fmt.g(aTot)} ACH`], ['Air through the cavity per hour', `${fmt.n(aTot * airKg * 1000, 1)} g`], ['Water delivered per hour at 3 g/kg supply', `${fmt.n(aTot * airKg * 3, 3)} g`]]} />}
         </Step>
 
@@ -175,7 +175,7 @@ export default function Explain({ result, presets, inp }) {
         </Step>
 
         <Step title="6. End of life and hours per gram" figure={<FigLife h={h} />}>
-          <p>Two numbers. The sieve is called full at 95 % of its 25 °C capacity, because a Langmuir curve reaches 100 % only asymptotically. First fog is the first hour any water condenses on the pane; it can come before or after full, depending on how cold the pane runs.</p>
+          <p>Two numbers. The sieve is called full at 95 % of its 25 °C capacity, because a Langmuir curve reaches 100 % only asymptotically; at 35 % room RH its equilibrium is 96.7 %, so thresholds above that would never fire. First fog is the first hour any water condenses on the pane; it can come before or after full, depending on how cold the pane runs.</p>
           <div className="formula">{`exhausted_hour = first hour q ≥ 0.95 · q_max(25 °C)\nhours_per_gram = exhausted_hour / grams\ngrams for one year ≈ 8760 / hours_per_gram`}</div>
           {h && <Live rows={[['Full after', h.exhausted_hour === null ? 'not within run' : `${fmt.n(h.exhausted_hour)} h`], ['First fog', h.first_condensation_hour === null ? 'none' : `${fmt.n(h.first_condensation_hour)} h`], ['Hours per gram', h.hours_per_gram ?? '—']]} />}
         </Step>

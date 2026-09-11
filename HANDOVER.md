@@ -52,10 +52,15 @@ window ~230 ACH, best certified insert ~9 ACH. Default scenario
 (resealed 0.10 / best insert 0.06): 50 g full in 11 h, 0.22 h/g,
 ~40 kg for a year. Earlier ACH ladders (0.02 / 0.1 "sealed") were two
 orders of magnitude tighter than any certified product; see audit.
-Desiccant is an IGU-grade-seal technology. The 2-D sweep (mass x
-retrofit leakage) shows where it flips; deeper cavities help linearly.
+Desiccant is an IGU-grade-seal technology, and BOTH layers must be
+tight: a resealed existing window (0.10) alone fills 500 g in a day.
+Cavity offset does not change fill time (crack flow per m2 is fixed;
+deeper cavity = lower ACH but more air). See AUDIT.md for the ranked
+error budget and the cross-check.
 
 ## Backlog
+
+- Measurements that would tighten the model most: AUDIT.md section 4.
 
 - Vendor 3A data sheet to replace the fitted isotherm; add 4A, silica
   gel, CaCl2 rows.

@@ -74,6 +74,14 @@ class Sieve:
         return self.q_max(t) * k * rh / (1.0 + k * rh)
 
 
+def _q_next(sieve, q, W1, t_air, dt, allow_desorption, p_atm):
+    qe = sieve.q_eq(rh_from_w(t_air, W1, p_atm), t_air)
+    q1 = (q + (dt / sieve.tau_h) * qe) / (1.0 + dt / sieve.tau_h)
+    if q1 < q and not allow_desorption:
+        q1 = q
+    return q1
+
+
 # ---------------------------------------------------------------------------
 # The loop
 # ---------------------------------------------------------------------------
@@ -95,6 +103,7 @@ def run_reference(
     ach_out: float, ach_in: float, gap_m: float,
     grams_per_m2: float, sieve: Sieve = Sieve(), allow_desorption: bool = False,
     full_fraction: float = 0.95, max_years: int = 3, film_cap_kg: float = 0.1,
+    stop_hours_after_exhaustion: int | None = 240,
     h_cold: float = 3.0, h_warm: float = 3.0, cp: float = 1005.0,
     dt_min: float = 1.0, p_atm: float = 101325.0,
 ) -> RefResult:
@@ -143,24 +152,22 @@ def run_reference(
                 #   W1 = W0 + dt[ a (Wsup - W1) - (m_des/m_cav) (q1 - q0)/dt ]
                 #   q1 = (q0 + (dt/tau) q_eq(W1)) / (1 + dt/tau)
                 # by bisection, then apply the pane constraint.
-                def q_next(W1):
-                    qe = sieve.q_eq(rh_from_w(t_air, W1, p_atm), t_air)
-                    q1 = (q + (dt / sieve.tau_h) * qe) / (1.0 + dt / sieve.tau_h)
-                    if q1 < q and not allow_desorption:
-                        q1 = q
-                    return q1
-                def resid(W1):
-                    return W1 - (w + dt * a_tot * (w_sup - W1) - (m_des / m_cav) * (q_next(W1) - q))
-                lo, hi = 0.0, max(w, w_sup, ws) * 1.5 + 1e-6
-                for _k in range(60):
-                    mid = 0.5 * (lo + hi)
-                    if resid(mid) < 0.0:
-                        lo = mid
-                    else:
-                        hi = mid
-                    if hi - lo < 1e-13:
-                        break
-                W1 = 0.5 * (lo + hi)
+                q_next = lambda W1, q=q: _q_next(sieve, q, W1, t_air, dt, allow_desorption, p_atm)
+                if m_des <= 0.0:
+                    # no desiccant: the implicit step is linear, solve directly
+                    W1 = (w + dt * a_tot * w_sup) / (1.0 + dt * a_tot)
+                else:
+                    resid = lambda W1, w=w, q=q: W1 - (w + dt * a_tot * (w_sup - W1) - (m_des / m_cav) * (q_next(W1) - q))
+                    lo, hi = 0.0, max(w, w_sup, ws) * 1.5 + 1e-6
+                    for _k in range(40):
+                        mid = 0.5 * (lo + hi)
+                        if resid(mid) < 0.0:
+                            lo = mid
+                        else:
+                            hi = mid
+                        if hi - lo < 1e-12:
+                            break
+                    W1 = 0.5 * (lo + hi)
                 if W1 > ws:
                     # pane condensing: pin at ws, desiccant follows ws, pane takes the rest
                     W1 = ws
@@ -200,6 +207,9 @@ def run_reference(
             if exhausted is None and m_des > 0.0 and q >= q_full:
                 exhausted = hour_index + 1
             hour_index += 1
+            if (exhausted is not None and stop_hours_after_exhaustion is not None
+                    and hour_index >= exhausted + stop_hours_after_exhaustion):
+                break
         if exhausted is not None:
             break
 
