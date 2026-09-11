@@ -17,21 +17,25 @@ function Stat({ cls, value, unit, label, sub }) {
   )
 }
 
-function Headline({ h, inputs }) {
-  const ex = fmt.hours(h.exhausted_hour)
-  const fc = fmt.hours(h.first_condensation_hour)
+function Headline({ h, inputs, unit, setUnit }) {
+  const div = unit === 'years' ? 8760 : 730.5
+  const show = (hours) => hours === null ? null : fmt.n(hours / div, hours / div < 10 ? 2 : 1)
+  const ex = show(h.exhausted_hour), fc = show(h.first_condensation_hour)
   return (
     <div className="headline">
+      <div className="unit-toggle" role="group" aria-label="Time unit">
+        {['months', 'years'].map((u) => <button key={u} className="btn small" aria-pressed={unit === u} onClick={() => setUnit(u)}>{u}</button>)}
+      </div>
       <Stat cls="sand"
-        value={ex ? fmt.n(ex.v, ex.u === 'hours' ? 0 : 1) : (h.capped ? `> ${h.years_run}` : 'never')}
-        unit={ex ? ex.u : (h.capped ? 'years' : '')}
+        value={ex ?? (h.capped ? `> ${fmt.n(h.years_run * 8760 / div, 0)}` : 'never')}
+        unit={unit}
         label={`${fmt.n(inputs.grams)} g of ${inputs.desiccant === 'ms3a' ? '3A sieve' : inputs.desiccant} lasts`}
-        sub={ex ? `full after ${fmt.n(h.exhausted_hour)} hours; holds ${fmt.n(inputs.capacity_g, 1)} g of water` : `run capped at ${h.years_run} years, loading ${h.final_loading_pct_of_max}%`} />
+        sub={ex ? `full after ${fmt.n(h.exhausted_hour)} hours (${fmt.n(h.exhausted_hour / 24, 1)} days); holds ${fmt.n(inputs.capacity_g, 1)} g of water` : `run capped at ${h.years_run} years, loading ${h.final_loading_pct_of_max}%`} />
       <Stat cls="fog"
-        value={fc ? fmt.n(fc.v, fc.u === 'hours' ? 0 : 1) : 'none'}
-        unit={fc ? fc.u : ''}
+        value={fc ?? 'none'}
+        unit={fc ? unit : ''}
         label="until the pane first fogs"
-        sub={fc ? `hour ${fmt.n(h.first_condensation_hour)}, ${fmt.clock(h.first_condensation_hour)}` : `no condensation in ${h.years_run} year${h.years_run > 1 ? 's' : ''}`} />
+        sub={fc ? `hour ${fmt.n(h.first_condensation_hour)} (${fmt.n(h.first_condensation_hour / 24, 1)} days), ${fmt.clock(h.first_condensation_hour)}` : `no condensation in ${h.years_run} year${h.years_run > 1 ? 's' : ''}`} />
       <Stat cls="glass"
         value={h.hours_per_gram !== null ? fmt.n(h.hours_per_gram, h.hours_per_gram < 10 ? 2 : 0) : '—'}
         unit={h.hours_per_gram !== null ? 'h / g' : ''}
@@ -191,12 +195,13 @@ function Years({ years }) {
 }
 
 export default function Simulate({ result, busy }) {
+  const [unit, setUnit] = useState('months')
   if (!result) return <div className="status">{busy ? 'Fetching weather and running the first year…' : 'Set inputs and run.'}</div>
   const { headline, inputs, year1, daily, years } = result
   return (
     <>
       {busy && <div className="status">Running…</div>}
-      <Headline h={headline} inputs={inputs} />
+      <Headline h={headline} inputs={inputs} unit={unit} setUnit={setUnit} />
       {year1 && <Animation y1={year1} inputs={inputs} headline={headline} />}
       <LongChart daily={daily} headline={headline} />
       <Years years={years} />

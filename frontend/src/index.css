@@ -113,7 +113,10 @@ button { cursor: pointer; }
 
 /* -------------------------------------------------------------- content */
 .content { padding: 22px 26px 60px; min-width: 0; }
-.headline { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+.headline { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; position: relative; }
+.unit-toggle { position: absolute; right: 0; top: -34px; display: flex; gap: 4px; }
+.unit-toggle .btn[aria-pressed="true"] { border-color: var(--glass); color: var(--glass); background: var(--glass-2); }
+.content { padding-top: 40px; }
 @media (max-width: 760px) { .headline { grid-template-columns: 1fr; } }
 .stat {
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);

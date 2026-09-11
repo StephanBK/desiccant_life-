@@ -84,20 +84,20 @@ from engine.psychro import (
 
 #: Outdoor path: leakage through the EXISTING window into the cavity.
 ACH_OUT_PRESETS: dict[str, float] = {
-    "weathered": 20.0,
-    "leaky": 5.0,
-    "typical": 1.0,
-    "tight": 0.2,
-    "sealed": 0.02,
     "hermetic": 0.002,
+    "sealed": 0.02,
+    "tight": 0.2,
+    "typical": 1.0,
+    "leaky": 5.0,
+    "weathered": 20.0,
 }
 ACH_OUT_LABELS: dict[str, str] = {
-    "weathered": "Weathered - failed gaskets, open joints",
-    "leaky": "Leaky - aged single-hung, no weatherstrip",
-    "typical": "Typical - serviceable commercial window",
-    "tight": "Tight - recently resealed",
-    "sealed": "Sealed - new unit or wet-sealed perimeter",
     "hermetic": "Hermetic - IGU-grade edge seal (ESTIMATE)",
+    "sealed": "Sealed - new unit or wet-sealed perimeter",
+    "tight": "Tight - recently resealed",
+    "typical": "Typical - serviceable commercial window",
+    "leaky": "Leaky - aged single-hung, no weatherstrip",
+    "weathered": "Weathered - failed gaskets, open joints",
 }
 
 #: Room path: the SWR's own vent or perimeter leakage into the cavity.
