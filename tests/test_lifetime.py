@@ -207,11 +207,19 @@ def test_run_finishes_the_exhaustion_year(base, weather):
 
 
 def test_desorption_toggle_changes_answer(base, weather):
+    """Desorption only matters where the vents can carry released water
+    away or the pane can catch it. At hermetic leakage the toggle is
+    (correctly) almost inert; at moderate leakage with a large sieve it
+    extends life."""
     from dataclasses import replace
-    hermetic = replace(base, ach_out=0.002, ach_in=0.005, absorptance=0.10, sky_radiation=True)
-    a = run_lifetime(hermetic, weather)
-    b = run_lifetime(replace(hermetic, allow_desorption=True), weather)
-    assert b.exhausted_hour != a.exhausted_hour
+    mod = replace(base, ach_out=0.5, ach_in=0.5, desiccant_grams=200, absorptance=0.10, sky_radiation=True, max_years=2)
+    a = run_lifetime(mod, weather)
+    b = run_lifetime(replace(mod, allow_desorption=True), weather)
+    qa, qb = a.year1["loading"], b.year1["loading"]
+    assert all(y >= x - 1e-12 for x, y in zip(qa, qa[1:]))                 # one-way: never falls
+    assert any(y < x - 1e-12 for x, y in zip(qb, qb[1:]))                  # two-way: releases when hot/dry
+    assert b.years[0].condensed_kg_per_m2 < a.years[0].condensed_kg_per_m2  # released water leaves via vents, less on the pane
+    assert all(x >= 0.0 for x in qb)
 
 
 def test_year1_trace_loading_is_monotone_without_desorption(base, weather):

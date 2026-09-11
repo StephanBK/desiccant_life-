@@ -27,9 +27,12 @@ THE HOUR, in order
   3. desiccant uptake toward its isotherm equilibrium at the cavity RH
   4. drain any film beyond the retained cap
 
-Sub-stepping (default 4 per hour) keeps the split between 2 and 3 honest;
-the desiccant time constant is hours, so 15-minute slices are well inside
-its resolution.
+Steps 2 and 3 are solved TOGETHER (coupled_substep): the cavity air is a
+fast variable in quasi-equilibrium between vent supply and desiccant
+uptake, and the pane condenses only if that equilibrium humidity exceeds
+saturation. Sub-steps (default 4 per hour, more if the desiccant time
+constant is short) only need to resolve the desiccant's own dynamics.
+Without desiccant the engine's closed-form step_hour is used unchanged.
 
 END OF LIFE, two numbers
 ------------------------
@@ -348,6 +351,137 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
     )
 
 
+def coupled_substep(
+    w_cav: float, q: float, film: float,
+    w_sup: float, w_sat: float, a_tot: float, m_cav: float,
+    m_des: float, des: DesiccantType, t_air: float, tau: float, dt: float,
+    allow_desorption: bool, p_atm: float, film_cap: float,
+) -> tuple[float, float, float, float, float]:
+    """One substep with air, desiccant and cold pane solved TOGETHER.
+
+    Returns (w_cav, q, film, condensed_kg, uptake_kg), all per m2 of glass.
+
+    WHY NOT SPLIT
+    -------------
+    The cavity air holds ~0.005 g/m2 of water; the desiccant moves ~1 g/m2
+    per hour. The air's time constant against the desiccant is seconds, so
+    any split scheme with minute or quarter-hour steps either throttles the
+    supply (air emptied once per step, uptake capped at one cavity volume
+    per step: 5x too slow at 20 ACH) or overshoots on desorption (a step's
+    worth of released water dumped into air that cannot hold it, fogging
+    the pane spuriously). Treating the air as QUASI-STEADY fixes both.
+
+    THE BALANCE
+    -----------
+    Rates in kg/m2/h as functions of the cavity humidity W:
+
+        S(W) = a . m_cav . (W_sup - W)             net supply from vents
+        D(W) = (m_des / tau) . (q_eq(W) - q)       desiccant uptake (<0 desorbs)
+
+    S falls with W, D rises with W, so S(W) = D(W) has one root W*, found
+    by bisection on [min(W_sup, W_eq), max(W_sup, W_eq)] where W_eq is the
+    humidity the desiccant is in equilibrium with (D = 0). With no vents
+    W* = W_eq exactly.
+
+    THEN THE PANE
+    -------------
+    If W* >= W_sat(T_cold) the pane is condensing: the air pins at W_sat,
+    the desiccant takes D(W_sat).dt and the pane takes the rest of the
+    supply. If W* < W_sat and there is a film, the film evaporates to hold
+    W_sat until it runs out, feeding desiccant and outflow. Otherwise the
+    air sits at W* and the desiccant takes exactly what the vents bring.
+
+    The initial air inventory (W_0 - W_new).m_cav is booked to whichever
+    sink takes it so the water balance closes to rounding.
+    """
+    inv0 = w_cav * m_cav
+    q_eq_of = lambda W: des.q_eq(rh_from_t_w(t_air, W, p_atm_pa=p_atm) if W > 0 else 0.0, t_air)
+    k_des = m_des / tau
+
+    # Inactive desiccant (cannot take water even from supply-level air and
+    # is not allowed to give it back): the air is no longer a fast variable,
+    # so use the plain exchange + pane step.
+    if not allow_desorption and q_eq_of(max(w_sup, w_cav)) <= q:
+        w_new, c, _e, film = step_hour(w_cav, w_sup, w_sat, a_tot, m_cav, film, dt)
+        film, _d = drain_excess(film, film_cap)
+        return w_new, q, film, c, 0.0
+
+    def D(W):
+        d = k_des * (q_eq_of(W) - q)
+        return d if (allow_desorption or d > 0.0) else 0.0
+
+    def S(W):
+        return a_tot * m_cav * (w_sup - W)
+
+    # --- quasi-steady humidity W* -------------------------------------
+    w_eq = _w_from_rh(des.rh_eq(q, t_air), t_air, p_atm)
+    if not allow_desorption and w_eq > w_sup:
+        w_eq = w_sup                     # cannot push air above supply without desorbing
+    lo, hi = min(w_sup, w_eq), max(w_sup, w_eq)
+    if a_tot <= 0.0:
+        w_star = w_eq
+    elif hi - lo < 1e-12:
+        w_star = lo
+    else:
+        for _ in range(48):
+            mid = 0.5 * (lo + hi)
+            if S(mid) - D(mid) > 0.0:
+                lo = mid
+            else:
+                hi = mid
+            if hi - lo < 1e-9 * max(hi, 1e-6):
+                break
+        w_star = 0.5 * (lo + hi)
+
+    condensed = 0.0
+    uptake = 0.0
+
+    if w_star >= w_sat:
+        # pane condensing: air pinned at saturation
+        d = D(w_sat) * dt
+        supply = S(w_sat) * dt + max(0.0, inv0 - w_sat * m_cav)   # plus the air's own excess
+        uptake = d
+        condensed = max(0.0, supply - d)
+        w_new = w_sat
+        film += condensed
+    elif film > 0.0 and w_star < w_sat:
+        # film present: it feeds the air at saturation until gone
+        drain_rate = D(w_sat) - S(w_sat)                     # > 0 here
+        headroom = w_sat * m_cav - inv0
+        need = drain_rate * dt + headroom
+        if need <= film:
+            film -= need
+            uptake = D(w_sat) * dt
+            w_new = w_sat
+        else:
+            # film runs out part-way through the step: that fraction at
+            # saturation, the rest at W*. The last of the film goes to the
+            # air (headroom) and is then shared like any other water.
+            frac = film / need if need > 0 else 0.0
+            uptake = D(w_sat) * dt * frac + D(w_star) * dt * (1.0 - frac)
+            film = 0.0
+            w_new = w_star
+    else:
+        # Uptake is rate-based. The air's own inventory change (W_0 -> W*)
+        # is ~0.005 g/m2 and belongs to the air, not the desiccant; booking
+        # it to the desiccant made loading drift down when supply air got
+        # wetter. Water balance closes to that inventory.
+        w_new = w_star
+        uptake = D(w_star) * dt
+
+    if m_des > 0.0:
+        q = max(0.0, q + uptake / m_des)
+    if film > film_cap:
+        film = film_cap
+    return w_new, q, film, condensed, uptake
+
+
+def _w_from_rh(rh: float, t_c: float, p_atm: float) -> float:
+    if rh <= 0.0:
+        return 0.0
+    return w_from_t_rh(t_c, min(rh, 1.0), p_atm_pa=p_atm)
+
+
 # ---------------------------------------------------------------------------
 # The solver
 # ---------------------------------------------------------------------------
@@ -371,7 +505,8 @@ def run_lifetime(
     tau = inp.tau
     q_full = inp.full_fraction * des.q_max(25.0)
     p_atm = atmospheric_pressure_pa(weather.elevation_m)
-    dt = 1.0 / inp.substeps
+    nsub = max(inp.substeps, int(math.ceil(4.0 / tau)))
+    dt = 1.0 / nsub
 
     # State
     w_cav = tb.w_supply[0]
@@ -401,22 +536,19 @@ def run_lifetime(
             m_cav = tb.m_cav[i]; a_tot = tb.ach_total[i]; t_air = tb.t_air_c[i]
             hour_cond = 0.0; hour_up = 0.0
 
-            for _ in range(inp.substeps):
-                w_cav, c, _e, film = step_hour(w_cav, w_sup, w_sat, a_tot, m_cav, film, dt)
+            if m_des > 0.0:
+                # Coupled air/desiccant/pane step. Substeps only need to
+                # resolve the desiccant's own time constant.
+                for _ in range(nsub):
+                    w_cav, q, film, c, up = coupled_substep(
+                        w_cav, q, film, w_sup, w_sat, a_tot, m_cav, m_des, des, t_air,
+                        tau, dt, inp.allow_desorption, p_atm, inp.max_film_kg,
+                    )
+                    hour_cond += c
+                    hour_up += up
+            else:
+                w_cav, c, _e, film = step_hour(w_cav, w_sup, w_sat, a_tot, m_cav, film, 1.0)
                 hour_cond += c
-                if m_des > 0.0:
-                    rh_cav = rh_from_t_w(t_air, w_cav, p_atm_pa=p_atm)
-                    q_eq = des.q_eq(rh_cav, t_air)
-                    q_new = uptake_step(q, q_eq, tau, dt, inp.allow_desorption)
-                    dm = (q_new - q) * m_des                      # kg into desiccant
-                    if dm > 0.0:
-                        avail = w_cav * m_cav                      # cannot take more than the air holds
-                        if dm > avail:
-                            dm = avail
-                            q_new = q + dm / m_des
-                    w_cav = max(0.0, w_cav - dm / m_cav)
-                    q = q_new
-                    hour_up += dm
                 film, _drained = drain_excess(film, inp.max_film_kg)
 
             hours_run += 1
