@@ -177,7 +177,10 @@ def test_desorption_never_shortens_life(w, inp):
 @given(weather_years(), inputs(max_years=2))
 def test_per_area_scaling(w, inp):
     """Quadruple the glass and the grams: same fill hour. Leakage is per m2
-    of window so ACH is unchanged; the model is per m2 throughout."""
+    of window so ACH is unchanged; the model is per m2 throughout.
+    Sealant diffusion is the one term that is per PERIMETER (2x, not 4x),
+    so it is switched off here; it has its own bound below."""
+    inp = replace(inp, bead_width_m=0.0)
     g = inp.geometry
     big = replace(inp, geometry=CavityGeometry(2 * g.width_m, 2 * g.height_m, g.offset_m),
                   desiccant_grams=4 * inp.desiccant_grams)
@@ -214,8 +217,11 @@ def test_deterministic(w, inp):
 @given(weather_years(), inputs(max_years=1, al_out=0.0, al_in=0.0, dp_pa=0.0, wind_scaling=False))
 def test_sealed_cavity_only_has_its_own_water(w, inp):
     """No vents: the desiccant can only take the water the cavity held at
-    the start (plus nothing), so uptake is bounded by one cavity volume."""
+    the start plus what diffuses through the sealant bead, so uptake is
+    bounded by one cavity volume plus the bead's integrated flux."""
     r = run_lifetime(inp, w)
     area = inp.geometry.glazing_area_m2
     initial_g = r.tables.w_supply[0] * r.tables.m_cav[0] * 1000.0 * area
-    assert r.total_water_into_desiccant_g <= initial_g * 1.05 + 1e-6
+    bead_g = sum(y.net_diffusion_g for y in r.years)
+    assert r.total_water_into_desiccant_g <= (initial_g + bead_g) * 1.05 + 1e-6
+    assert bead_g >= 0.0
