@@ -257,6 +257,10 @@ def _headline(r: LifetimeResult) -> dict:
     }
 
 
+def _round_dict(d: dict, nd: int = 2) -> dict:
+    return {k: (None if v is None else round(v, nd)) for k, v in d.items()}
+
+
 def _result_payload(r: LifetimeResult, echo: dict, location, weather, cached: bool, trace: bool) -> dict:
     tb = r.tables
     payload = {
@@ -265,6 +269,16 @@ def _result_payload(r: LifetimeResult, echo: dict, location, weather, cached: bo
         "location": location.__dict__ if hasattr(location, "__dict__") else str(location),
         "weather": {**weather.describe(), "cached": cached},
         "headline": _headline(r),
+        # Net water by source. "life": up to the hour the sieve is full (the
+        # headline split); "run": the whole simulation incl. aftermath.
+        # Shares are signed and sum to 100; a negative share is a path that
+        # REMOVED water (its air was drier than the cavity). None when the
+        # net total is not positive.
+        "contributions": {
+            "life": _round_dict(r.contributions()),
+            "run": _round_dict(r.contributions_run()),
+            "life_hours": r.exhausted_hour if r.exhausted_hour is not None else r.hours_run,
+        },
         "years": [asdict(y) for y in r.years],
         "daily": {
             "loading": _round_list(r.daily_loading, 5),

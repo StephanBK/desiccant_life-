@@ -155,6 +155,11 @@ export const TIPS = {
     how: 'In the supply-limited regime this is ≈ 8760 / (annual water delivered per gram of capacity). The sub-line divides 8,760 by it to give grams for one year at this leakage.',
     src: 'Undefined when the run is not exhausted.',
   },
+  out_source: {
+    what: 'Net water each path delivered to the cavity over the sieve\'s life (to the hour it is full; the whole run if it never fills): outdoor air through the existing window, room air through the retrofit, and vapour diffusion through the sealant bead.',
+    how: 'Each hour the solved cavity humidity W is compared with each path\'s own: N = ACH · m_air · (W_path − W) · dt. The split is exact because the supply is a flow-weighted mean. A negative value is a path that carried water OUT, which cold, dry outdoor air does in winter. Shares are signed and sum to 100 % of the net total; they are blank when the net total is not positive.',
+    src: 'engine/lifetime.py split_vent_net, contribution_shares; tests/test_contributions.py.',
+  },
   out_pane: {
     what: 'Temperature of the existing pane\'s cavity-side face, °F.',
     how: 'T_out + f·(T_room − T_out) + sun − sky + vent warming.',

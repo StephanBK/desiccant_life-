@@ -1,7 +1,8 @@
 # HANDOVER — Desiccant Lifetime Simulator (ANLY-003)
 
-Last session: 2026-09-11 (session 2). State: v0.2 built and verified
-locally; v0.1 is on GitHub (StephanBK/desiccant_life-), v0.2 not yet pushed.
+Last session: 2026-09-14 (session 3). State: v0.4 built and verified on a
+fresh clone; main on GitHub (StephanBK/desiccant_life-) is at c922411 and
+Railway serves it; v0.4 (be7eb37+) not yet pushed.
 
 ## Where things stand
 
@@ -40,7 +41,41 @@ property tests, rail + tooltips, cinematic tab. All done. See AUDIT.md.
 - Tooltips: engineering register (decision 2026-09-11), inputs and outputs.
 - Rail closed on first load with a summary strip.
 
+## Session 3 (2026-09-14) summary
+
+Water-source accounting and the no-desiccant equivalence check.
+- engine/lifetime.py: coupled_substep returns the net vent water of the
+  step; split_vent_net splits it exactly into outdoor and room parts
+  (N = ACH . m_air . (W_path - W_op) . dt, signed: negative = that path
+  carried water OUT). YearSummary and LifetimeResult carry net_outdoor_g,
+  net_room_g, net_diffusion_g; LifetimeResult also life_* (to the hour
+  the sieve is full: the headline) and YearSummary heating_* (Oct-Mar).
+  contribution_shares gives signed percentages of the net total (None
+  when the total is not positive).
+- API: payload["contributions"] = {life, run, life_hours}; year rows carry
+  the new fields; Excel Summary and Years sheets extended.
+- UI: summary strip ("water from room 52 % . outdoor 48 %"), a
+  "Where the water came from" card under the headline (bar + legend;
+  removals shown in words, not negative widths), Explain step 7 with the
+  formulas and a live figure, year table columns.
+- tests/test_contributions.py: run_lifetime at 0 g vs the original
+  engine.moisture.run_year (byte-identical to cavity_moisture): identical
+  condensing hours, yearly condensed within 2 % (0.2 % room-dominated),
+  hourly W_cav exact except a handful of film-runs-out hours; the
+  differences are the stream temperature, m_cav at room vs cavity
+  humidity, and the starting state (spin-up off). Plus: split exactness,
+  signed shares, heating-season calendar, life balance = uptake, winter
+  outdoor net < 0 at 0 g with a loose existing window, fresh sieve takes
+  from both paths.
+
 ## Decisions log
+
+- 2026-09-14: contributions are NET (signed), not gross; sealant
+  diffusion is its own third slice; headline split is over the sieve's
+  life (the aftermath year would otherwise bury the fill: thousands of
+  grams pass through an inactive sieve); no hourly split, but a heating
+  season (Oct-Mar) split per year because at 0 g the full-year nets
+  nearly cancel and hide winter drying. Presets unchanged.
 
 - 2026-09-11 (late): INOVUES practice is wet-seal the existing window,
   then a wet-sealed retrofit. Presets now start at "wet_sealed" 0.005

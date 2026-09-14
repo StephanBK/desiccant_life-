@@ -1,4 +1,5 @@
 import { fmt } from './api.js'
+import { SourceBar, SourceLegend } from './Sources.jsx'
 
 const C = { glass: '#1f5fa8', water: '#1f9e9a', fog: '#d0642f', sand: '#9a7330', cold: '#6e8fb5', ink2: '#4b5a72', line: '#d5dce4' }
 
@@ -77,6 +78,27 @@ function FigEnergy() {
   )
 }
 
+function FigSources({ c }) {
+  // Two arrows into the cavity, widths by |net|, pointing OUT when negative.
+  const out = c?.outdoor_g ?? 0, room = c?.room_g ?? 0
+  const big = Math.max(Math.abs(out), Math.abs(room), 1e-9)
+  const w = (g) => 2 + 8 * Math.abs(g) / big
+  const outArrow = out >= 0 ? { x1: 50, x2: 118, tip: '118,74 134,84 118,94' } : { x1: 134, x2: 66, tip: '66,74 50,84 66,94' }
+  const roomArrow = room >= 0 ? { x1: 250, x2: 182, tip: '182,120 166,130 182,140' } : { x1: 166, x2: 234, tip: '234,120 250,130 234,140' }
+  return (
+    <svg viewBox="0 0 300 200">
+      <rect x="0" y="0" width="90" height="200" fill="#e6edf5" /><rect x="210" y="0" width="90" height="200" fill="#f4f1ea" />
+      <rect x="90" y="0" width="8" height="200" fill={C.cold} /><rect x="202" y="0" width="8" height="200" fill="#c9d8ea" />
+      <text x="45" y="20" textAnchor="middle" fontSize="11" fill={C.ink2}>outdoor</text><text x="255" y="20" textAnchor="middle" fontSize="11" fill={C.ink2}>room</text>
+      <line x1={outArrow.x1} y1="84" x2={outArrow.x2} y2="84" stroke={C.cold} strokeWidth={w(out)} strokeLinecap="round" /><polygon points={outArrow.tip} fill={C.cold} />
+      <line x1={roomArrow.x1} y1="130" x2={roomArrow.x2} y2="130" stroke={C.water} strokeWidth={w(room)} strokeLinecap="round" /><polygon points={roomArrow.tip} fill={C.water} />
+      <text x="150" y="60" textAnchor="middle" fontSize="11" fill={C.cold} fontWeight="700">{out >= 0 ? 'adds' : 'removes'} {fmt.n(Math.abs(out), Math.abs(out) < 10 ? 1 : 0)} g</text>
+      <text x="150" y="160" textAnchor="middle" fontSize="11" fill={C.water} fontWeight="700">{room >= 0 ? 'adds' : 'removes'} {fmt.n(Math.abs(room), Math.abs(room) < 10 ? 1 : 0)} g</text>
+      <text x="150" y="110" textAnchor="middle" fontSize="11" fill={C.ink2}>net, over the sieve's life</text>
+    </svg>
+  )
+}
+
 function FigCondense() {
   return (
     <svg viewBox="0 0 300 200">
@@ -140,7 +162,7 @@ export default function Explain({ result, presets, inp }) {
     <div className="explain">
       <div className="card">
         <h2>What the simulator does, step by step</h2>
-        <p className="lede">Six pieces of physics, each with its formula and the numbers from your current run. Nothing here is fitted to make the answer come out a particular way; the estimates are listed at the end.</p>
+        <p className="lede">Seven pieces of physics, each with its formula and the numbers from your current run. Nothing here is fitted to make the answer come out a particular way; the estimates are listed at the end.</p>
 
         <Step title="1. The cavity holds a small inventory of water" figure={<FigInventory w={i?.width_in ?? inp.width_in} h={i?.height_in ?? inp.height_in} off={i?.offset_in ?? inp.offset_in} />}>
           <p>The state variable is the humidity ratio W of the cavity air, in kg of water per kg of dry air. W is used instead of RH because it is conserved when the air changes temperature; you can write a mass balance in W, not in RH.</p>
@@ -178,6 +200,27 @@ export default function Explain({ result, presets, inp }) {
           <p>Two numbers. The sieve is called full at 95 % of its 25 °C capacity, because a Langmuir curve reaches 100 % only asymptotically; at 35 % room RH its equilibrium is 96.7 %, so thresholds above that would never fire. First fog is the first hour any water condenses on the pane; it can come before or after full, depending on how cold the pane runs.</p>
           <div className="formula">{`exhausted_hour = first hour q ≥ 0.95 · q_max(25 °C)\nhours_per_gram = exhausted_hour / grams\ngrams for one year ≈ 8760 / hours_per_gram`}</div>
           {h && <Live rows={[['Full after', h.exhausted_hour === null ? 'not within run' : `${fmt.n(h.exhausted_hour)} h`], ['First fog', h.first_condensation_hour === null ? 'none' : `${fmt.n(h.first_condensation_hour)} h`], ['Hours per gram', h.hours_per_gram ?? '—']]} />}
+        </Step>
+
+        <Step title="7. Where the water comes from" figure={<FigSources c={result?.contributions?.life} />}>
+          <p>The supply in step 2 is a flow-weighted mix, so the water each path delivers can be split exactly. What matters is the sign: each path pushes the cavity toward its own humidity, so a path whose air is <em>drier</em> than the cavity carries water out. Cold outdoor air holds little water even at high RH, so in winter the outdoor path is usually a remover while the room path is the source, and the sum of the three is what the sieve and the pane took.</p>
+          <div className="formula">{`N_out  = ACH_out · m_air · (W_out − W_cav) · dt
+N_in   = ACH_in  · m_air · (W_room − W_cav) · dt
+N_bead = J · dt
+N_out + N_in + N_bead = into sieve + onto pane + Δ(cavity air)
+N_out < 0 whenever W_out < W_cav: outdoor air carries water out`}</div>
+          <p>A fresh sieve pulls the cavity to near zero humidity, so while it fills <em>every</em> path is a source, even the coldest outdoor air. Once the sieve is full or absent, the cavity rides at the mixed supply and the winter drying shows: over a year the two paths nearly cancel, so the year table also lists the October to March outdoor net on its own.</p>
+          {result?.contributions && <>
+            <SourceBar c={result.contributions.life} height={12} />
+            <SourceLegend c={result.contributions.life} compact />
+          </>}
+          {result?.years?.[0] && <Live rows={[
+            ['Life window', result.headline.exhausted_hour !== null ? `${fmt.n(result.contributions.life_hours)} h to full` : `${result.headline.years_run} yr run`],
+            ['Year 1, Oct–Mar outdoor net', `${fmt.n(result.years[0].heating_outdoor_g, 1)} g`],
+            ['Year 1, Oct–Mar room net', `${fmt.n(result.years[0].heating_room_g, 1)} g`],
+            ['Year 1, full-year outdoor net', `${fmt.n(result.years[0].net_outdoor_g, 1)} g`],
+            ['Year 1, full-year room net', `${fmt.n(result.years[0].net_room_g, 1)} g`],
+          ]} />}
         </Step>
 
         <section className="step" style={{ gridTemplateColumns: '1fr', borderBottom: 0 }}>

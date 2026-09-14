@@ -257,6 +257,25 @@ class YearSummary:
     loading_end: float
     rh_eq_end: float
     mean_cavity_dew_point_c: float
+    # Net water delivered to the cavity by each source, grams per window.
+    # Negative = that path removed water (its air was drier than the cavity).
+    net_outdoor_g: float = 0.0
+    net_room_g: float = 0.0
+    net_diffusion_g: float = 0.0
+    # Same, heating season only (October to March). At 0 g the yearly nets
+    # nearly cancel (condensate re-evaporates), so the season split is
+    # what makes winter drying by cold outdoor air visible.
+    heating_outdoor_g: float = 0.0
+    heating_room_g: float = 0.0
+    heating_diffusion_g: float = 0.0
+
+
+HEATING_SEASON_HOURS = 2160          # Jan 1 .. Mar 31 = 90 days
+HEATING_SEASON_START = 6552          # Oct 1 = day 273 (non-leap TMY)
+
+
+def in_heating_season(hour_of_year: int) -> bool:
+    return hour_of_year < HEATING_SEASON_HOURS or hour_of_year >= HEATING_SEASON_START
 
 
 @dataclass
@@ -271,6 +290,19 @@ class LifetimeResult:
     final_rh_eq: float
     total_water_into_desiccant_g: float
     years: list[YearSummary]
+    # Whole-run net water by source, grams per window (see YearSummary).
+    net_outdoor_g: float = 0.0
+    net_room_g: float = 0.0
+    net_diffusion_g: float = 0.0
+    # The same up to the hour the desiccant is full (the desiccant's LIFE),
+    # which is the headline question "where did the water in the sieve come
+    # from". Equal to the whole-run numbers when it never fills. The run
+    # continues past exhaustion to show the aftermath, and with an inactive
+    # sieve the aftermath can be thousands of grams passing through, which
+    # would otherwise bury the fill.
+    life_outdoor_g: float = 0.0
+    life_room_g: float = 0.0
+    life_diffusion_g: float = 0.0
     # Whole-run daily trace for the long chart: day index, loading, rh_eq,
     # cavity dew point, cold pane min. Length = days run.
     daily_loading: list[float] = field(default_factory=list)
@@ -292,6 +324,28 @@ class LifetimeResult:
     @property
     def first_condensation_days(self) -> float | None:
         return None if self.first_condensation_hour is None else self.first_condensation_hour / 24.0
+
+    def contributions(self) -> dict:
+        """Headline split over the desiccant's life (see life_* fields)."""
+        return contribution_shares(self.life_outdoor_g, self.life_room_g, self.life_diffusion_g)
+
+    def contributions_run(self) -> dict:
+        return contribution_shares(self.net_outdoor_g, self.net_room_g, self.net_diffusion_g)
+
+
+def contribution_shares(out_g: float, room_g: float, diff_g: float) -> dict:
+    """Net contribution of each source as grams and as a share of the net
+    total. Shares are signed and sum to 100 %: a source at -5 % removed a
+    twentieth of what the other sources delivered. When the net total is
+    not positive (everything is drying) the shares are None; the grams
+    still tell the story."""
+    total = out_g + room_g + diff_g
+    def pct(x):
+        return None if total <= 1e-9 else 100.0 * x / total
+    return {
+        "outdoor_g": out_g, "room_g": room_g, "diffusion_g": diff_g, "total_g": total,
+        "outdoor_pct": pct(out_g), "room_pct": pct(room_g), "diffusion_pct": pct(diff_g),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -381,10 +435,16 @@ def coupled_substep(
     w_sup: float, w_sat: float, a_tot: float, m_cav: float,
     m_des: float, des: DesiccantType, t_air: float, tau: float, dt: float,
     allow_desorption: bool, p_atm: float, film_cap: float, j_diff: float = 0.0,
-) -> tuple[float, float, float, float, float]:
+) -> tuple[float, float, float, float, float, float]:
     """One substep with air, desiccant and cold pane solved TOGETHER.
 
-    Returns (w_cav, q, film, condensed_kg, uptake_kg), all per m2 of glass.
+    Returns (w_cav, q, film, condensed_kg, uptake_kg, vent_net_kg), all per
+    m2 of glass. ``vent_net_kg`` is the NET water the two vent paths
+    delivered this substep, a_tot . m_cav . (W_sup - W_op) . dt at the
+    operating humidity W_op the step actually ran at; negative means the
+    vents carried water OUT. The caller splits it per path (see
+    ``split_vent_net``), which is exact because W_sup is a flow-weighted
+    mean.
 
     WHY NOT SPLIT
     -------------
@@ -428,9 +488,12 @@ def coupled_substep(
     # so use the plain exchange + pane step.
     if not allow_desorption and q_eq_of(max(w_sup, w_cav)) <= q:
         w_cav = w_cav + j_diff * dt / m_cav
-        w_new, c, _e, film = step_hour(w_cav, w_sup, w_sat, a_tot, m_cav, film, dt)
+        w_new, c, e, film = step_hour(w_cav, w_sup, w_sat, a_tot, m_cav, film, dt)
         film, _d = drain_excess(film, film_cap)
-        return w_new, q, film, c, 0.0
+        # Water balance of the closed-form step: vents = inventory change
+        # + condensed - evaporated (diffusion already booked to the air).
+        vent_net = (w_new - w_cav) * m_cav + c - e
+        return w_new, q, film, c, 0.0, vent_net
 
     def D(W):
         d = k_des * (q_eq_of(W) - q)
@@ -463,6 +526,7 @@ def coupled_substep(
 
     condensed = 0.0
     uptake = 0.0
+    vents = lambda W: a_tot * m_cav * (w_sup - W) * dt      # vent part of S, this substep
 
     if w_star >= w_sat:
         # pane condensing: air pinned at saturation
@@ -472,6 +536,7 @@ def coupled_substep(
         condensed = max(0.0, supply - d)
         w_new = w_sat
         film += condensed
+        vent_net = vents(w_sat)
     elif film > 0.0 and w_star < w_sat:
         # film present: it feeds the air at saturation until gone
         drain_rate = D(w_sat) - S(w_sat)                     # > 0 here
@@ -481,6 +546,7 @@ def coupled_substep(
             film -= need
             uptake = D(w_sat) * dt
             w_new = w_sat
+            vent_net = vents(w_sat)
         else:
             # film runs out part-way through the step: that fraction at
             # saturation, the rest at W*. The last of the film goes to the
@@ -489,6 +555,7 @@ def coupled_substep(
             uptake = D(w_sat) * dt * frac + D(w_star) * dt * (1.0 - frac)
             film = 0.0
             w_new = w_star
+            vent_net = vents(w_sat) * frac + vents(w_star) * (1.0 - frac)
     else:
         # Uptake is rate-based. The air's own inventory change (W_0 -> W*)
         # is ~0.005 g/m2 and belongs to the air, not the desiccant; booking
@@ -496,12 +563,33 @@ def coupled_substep(
         # wetter. Water balance closes to that inventory.
         w_new = w_star
         uptake = D(w_star) * dt
+        vent_net = vents(w_star)
 
     if m_des > 0.0:
         q = max(0.0, q + uptake / m_des)
     if film > film_cap:
         film = film_cap
-    return w_new, q, film, condensed, uptake
+    return w_new, q, film, condensed, uptake, vent_net
+
+
+def split_vent_net(vent_net: float, a_out: float, w_out: float, a_in: float, w_room: float,
+                   m_cav: float, dt: float) -> tuple[float, float]:
+    """Split the net vent water of one step into (outdoor, room) parts.
+
+    The step ran at some operating humidity W_op with
+        vent_net = a_tot . m . (W_sup - W_op) . dt,   W_sup = (a_out W_out + a_in W_room)/a_tot.
+    Recover W_op from vent_net, then each path's own net is
+        N_out = a_out . m . (W_out - W_op) . dt,   N_in = a_in . m . (W_room - W_op) . dt,
+    and N_out + N_in = vent_net identically. A path is NEGATIVE when its
+    air is drier than the cavity: it is carrying water out. That is the
+    winter outdoor path (cold air holds little water even at high RH).
+    """
+    a_tot = a_out + a_in
+    if a_tot <= 0.0 or m_cav <= 0.0 or dt <= 0.0:
+        return 0.0, 0.0
+    w_sup = (a_out * w_out + a_in * w_room) / a_tot
+    w_op = w_sup - vent_net / (a_tot * m_cav * dt)
+    return a_out * m_cav * (w_out - w_op) * dt, a_in * m_cav * (w_room - w_op) * dt
 
 
 def _bisect_source(D, j, w_eq, w_sat):
@@ -563,6 +651,8 @@ def run_lifetime(
     first_cond_hour: int | None = None
     years: list[YearSummary] = []
     total_uptake = 0.0
+    run_out = run_in = run_diff = 0.0
+    life_out = life_in = life_diff = None
 
     daily_q, daily_rh, daily_dp, daily_pane, daily_film = [], [], [], [], []
     daily_to, daily_rho, daily_cg = [], [], []
@@ -576,30 +666,39 @@ def run_lifetime(
     hours_run = 0
     for year in range(inp.max_years):
         y_cond = 0.0; y_hc = 0; y_hv = 0; y_up = 0.0; y_dp = 0.0
+        y_out = y_in = y_diff = 0.0
+        h_out = h_in = h_diff = 0.0
         d_q = d_rh = d_dp = 0.0; d_pane = 1e9; d_film = 0.0; d_n = 0
         d_to = d_rho = d_cg = 0.0
 
         for i in range(n):
             w_sup = tb.w_supply[i]; w_sat = tb.w_sat_cold[i]
             m_cav = tb.m_cav[i]; a_tot = tb.ach_total[i]; t_air = tb.t_air_c[i]
-            hour_cond = 0.0; hour_up = 0.0
+            hour_cond = 0.0; hour_up = 0.0; hour_vent = 0.0
+            a_out = tb.ach_out[i]; a_in = a_tot - a_out; w_out = tb.w_out[i]
 
             j_diff = tb.diff_kg_per_m2_h[i]
             if m_des > 0.0:
                 # Coupled air/desiccant/pane step. Substeps only need to
                 # resolve the desiccant's own time constant.
                 for _ in range(nsub):
-                    w_cav, q, film, c, up = coupled_substep(
+                    w_cav, q, film, c, up, vn = coupled_substep(
                         w_cav, q, film, w_sup, w_sat, a_tot, m_cav, m_des, des, t_air,
                         tau, dt, inp.allow_desorption, p_atm, inp.max_film_kg, j_diff,
                     )
                     hour_cond += c
                     hour_up += up
+                    hour_vent += vn
             else:
-                w_cav = w_cav + j_diff / m_cav                  # diffusion, then exchange
-                w_cav, c, _e, film = step_hour(w_cav, w_sup, w_sat, a_tot, m_cav, film, 1.0)
+                w0 = w_cav + j_diff / m_cav                     # diffusion, then exchange
+                w_cav, c, e, film = step_hour(w0, w_sup, w_sat, a_tot, m_cav, film, 1.0)
                 hour_cond += c
+                hour_vent += (w_cav - w0) * m_cav + c - e
                 film, _drained = drain_excess(film, inp.max_film_kg)
+            n_out, n_in = split_vent_net(hour_vent, a_out, w_out, a_in, tb.w_room, m_cav, 1.0)
+            y_out += n_out; y_in += n_in; y_diff += j_diff
+            if in_heating_season(i):
+                h_out += n_out; h_in += n_in; h_diff += j_diff
 
             hours_run += 1
             total_uptake += hour_up
@@ -640,17 +739,26 @@ def run_lifetime(
 
             if exhausted_hour is None and m_des > 0.0 and q >= q_full:
                 exhausted_hour = hours_run
+                life_out, life_in, life_diff = run_out + y_out, run_in + y_in, run_diff + y_diff
 
         years.append(YearSummary(
             year=year + 1, condensed_kg_per_m2=y_cond, hours_condensing=y_hc,
             hours_visible=y_hv, water_into_desiccant_g=y_up * 1000.0 * area,
             loading_end=q, rh_eq_end=des.rh_eq(q, 21.0) if m_des > 0 else 1.0,
             mean_cavity_dew_point_c=y_dp / n,
+            net_outdoor_g=y_out * 1000.0 * area, net_room_g=y_in * 1000.0 * area,
+            net_diffusion_g=y_diff * 1000.0 * area,
+            heating_outdoor_g=h_out * 1000.0 * area, heating_room_g=h_in * 1000.0 * area,
+            heating_diffusion_g=h_diff * 1000.0 * area,
         ))
+        run_out += y_out; run_in += y_in; run_diff += y_diff
         # Finish the year exhaustion falls in, so first condensation and
         # the animation show the aftermath, then stop.
         if exhausted_hour is not None:
             break
+
+    if life_out is None:
+        life_out, life_in, life_diff = run_out, run_in, run_diff
 
     hpg = None
     if exhausted_hour is not None and m_des > 0.0:
@@ -661,6 +769,10 @@ def run_lifetime(
         years_run=len(years), hours_run=hours_run, hours_per_gram=hpg,
         final_loading=q, final_rh_eq=des.rh_eq(q, 21.0) if m_des > 0 else 1.0,
         total_water_into_desiccant_g=total_uptake * 1000.0 * area, years=years,
+        net_outdoor_g=run_out * 1000.0 * area, net_room_g=run_in * 1000.0 * area,
+        net_diffusion_g=run_diff * 1000.0 * area,
+        life_outdoor_g=life_out * 1000.0 * area, life_room_g=life_in * 1000.0 * area,
+        life_diffusion_g=life_diff * 1000.0 * area,
         daily_loading=daily_q, daily_rh_eq=daily_rh, daily_cav_dew_c=daily_dp,
         daily_pane_min_c=daily_pane, daily_film_max_kg=daily_film,
         daily_t_out_c=daily_to, daily_rh_out=daily_rho, daily_cond_g=daily_cg,

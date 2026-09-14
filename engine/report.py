@@ -64,6 +64,17 @@ def build_workbook(result, echo: dict, headline: dict, weather_desc: dict, assum
         ("Final equilibrium RH of desiccant (%)", headline["final_rh_eq_pct"]),
         ("Total water into desiccant (g)", headline["total_water_into_desiccant_g"]),
     ]
+    c = result.contributions()
+    pct = lambda v: "n/a" if v is None else round(v, 1)
+    rows += [
+        ("Net water over desiccant life: outdoor path (g)", round(c["outdoor_g"], 2)),
+        ("Net water over desiccant life: room path (g)", round(c["room_g"], 2)),
+        ("Net water over desiccant life: sealant diffusion (g)", round(c["diffusion_g"], 2)),
+        ("Share of net total: outdoor (%)", pct(c["outdoor_pct"])),
+        ("Share of net total: room (%)", pct(c["room_pct"])),
+        ("Share of net total: diffusion (%)", pct(c["diffusion_pct"])),
+        ("Note", "Negative = that path removed water (its air was drier than the cavity)."),
+    ]
     for k, v in rows:
         ws.cell(row=r, column=1, value=k).font = KEY
         ws.cell(row=r, column=2, value="n/a" if v is None else v)
@@ -86,11 +97,15 @@ def build_workbook(result, echo: dict, headline: dict, weather_desc: dict, assum
     ws = wb.create_sheet("Years")
     _header(ws, 1, ["Year", "Condensed g/m2", "Hours condensing", "Hours visible",
                     "Water into desiccant g", "Loading end kg/kg", "Desiccant RH_eq end %",
-                    "Mean cavity dew point degF"])
+                    "Mean cavity dew point degF",
+                    "Net outdoor g", "Net room g", "Net diffusion g",
+                    "Heating season net outdoor g", "Heating season net room g"])
     for i, y in enumerate(result.years, start=2):
         ws.append([y.year, round(y.condensed_kg_per_m2 * 1000, 2), y.hours_condensing, y.hours_visible,
                    round(y.water_into_desiccant_g, 2), round(y.loading_end, 4),
-                   round(100 * y.rh_eq_end, 2), round(psychro.c_to_f(y.mean_cavity_dew_point_c), 1)])
+                   round(100 * y.rh_eq_end, 2), round(psychro.c_to_f(y.mean_cavity_dew_point_c), 1),
+                   round(y.net_outdoor_g, 2), round(y.net_room_g, 2), round(y.net_diffusion_g, 2),
+                   round(y.heating_outdoor_g, 2), round(y.heating_room_g, 2)])
     _autowidth(ws)
 
     # Daily -----------------------------------------------------------

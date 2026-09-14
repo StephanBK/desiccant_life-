@@ -6,6 +6,11 @@ import Sweep from './Sweep.jsx'
 import Explain from './Explain.jsx'
 import Cinema from './Cinema.jsx'
 
+const srcPct = (c, k) => {
+  const p = c[`${k}_pct`]
+  if (p === null || p === undefined) return `${Math.round(c[`${k}_g`])} g`
+  return `${Math.round(p)} %`
+}
 const alNum = (v, presets) => (typeof v === 'number' ? v : (presets?.find((p) => p.key === v)?.al_cfm_ft2 ?? v))
 
 const TABS = [['simulate', 'Simulate'], ['cinema', 'Watch'], ['sweep', 'Sweep'], ['explain', 'Explain']]
@@ -52,6 +57,7 @@ export default function App() {
               <span>{inp.address}</span><span>{inp.width_in} × {inp.height_in} × {inp.offset_in} in</span>
               <span>existing {alNum(inp.al_out, presets?.al_out)} · retrofit {alNum(inp.al_in, presets?.al_in)} cfm/ft²</span><span>{inp.t_in} °F / {inp.rh_in} % RH</span>
               <span>{inp.grams} g {inp.desiccant === 'ms3a' ? '3A' : inp.desiccant}</span>
+              {result?.contributions && <span className="srcsum">water from room {srcPct(result.contributions.life, 'room')} · outdoor {srcPct(result.contributions.life, 'outdoor')}</span>}
               <button className="btn small primary" onClick={() => setRailOpen(true)}>Edit inputs</button>
             </div>
           )}

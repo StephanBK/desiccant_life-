@@ -5,6 +5,7 @@ import {
 import Cavity from './Cavity.jsx'
 import { fmt } from './api.js'
 import { Tip } from './Tip.jsx'
+import { SourceCard } from './Sources.jsx'
 
 const C = { glass: '#1f5fa8', water: '#1f9e9a', fog: '#d0642f', sand: '#9a7330', cold: '#6e8fb5', ink3: '#8592a6' }
 
@@ -193,12 +194,14 @@ function Years({ years }) {
     <div className="card">
       <h2>Per simulated year</h2>
       <table className="table">
-        <thead><tr><th>Year</th><th>Water into sieve, g</th><th>Loading at year end</th><th>Sieve RH at year end</th><th>Condensed, g/m²</th><th>Hours condensing</th><th>Hours visible</th></tr></thead>
+        <thead><tr><th>Year</th><th>Water into sieve, g</th><th>Loading at year end</th><th>Sieve RH at year end</th><th>Condensed, g/m²</th><th>Hours condensing</th><th>Hours visible</th><th>Net from room / outdoor / bead, g</th><th>Oct–Mar outdoor net, g</th></tr></thead>
         <tbody>
           {years.map((y) => (
             <tr key={y.year}>
               <td>{y.year}</td><td>{fmt.n(y.water_into_desiccant_g, 2)}</td><td>{fmt.n(100 * y.loading_end / 0.21, 1)} %</td>
               <td>{fmt.n(100 * y.rh_eq_end, 2)} %</td><td>{fmt.n(1000 * y.condensed_kg_per_m2, 1)}</td><td>{fmt.n(y.hours_condensing)}</td><td>{fmt.n(y.hours_visible)}</td>
+              <td>{fmt.n(y.net_room_g, 0)} / {fmt.n(y.net_outdoor_g, 0)} / {fmt.n(y.net_diffusion_g, 1)}</td>
+              <td className={y.heating_outdoor_g < 0 ? 'neg' : ''}>{fmt.n(y.heating_outdoor_g, 0)}</td>
             </tr>
           ))}
         </tbody>
@@ -210,11 +213,12 @@ function Years({ years }) {
 export default function Simulate({ result, busy }) {
   const [unit, setUnit] = useState('months')
   if (!result) return <div className="status">{busy ? 'Fetching weather and running the first year…' : 'Set inputs and run.'}</div>
-  const { headline, inputs, year1, daily, years } = result
+  const { headline, inputs, year1, daily, years, contributions } = result
   return (
     <>
       {busy && <div className="status">Running…</div>}
       <Headline h={headline} inputs={inputs} unit={unit} setUnit={setUnit} />
+      <SourceCard contributions={contributions} headline={headline} />
       {year1 && <Animation y1={year1} inputs={inputs} headline={headline} />}
       <LongChart daily={daily} headline={headline} />
       <Years years={years} />
