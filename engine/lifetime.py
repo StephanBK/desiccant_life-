@@ -334,14 +334,15 @@ class LifetimeResult:
 
 
 def contribution_shares(out_g: float, room_g: float, diff_g: float) -> dict:
-    """Net contribution of each source as grams and as a share of the net
-    total. Shares are signed and sum to 100 %: a source at -5 % removed a
-    twentieth of what the other sources delivered. When the net total is
-    not positive (everything is drying) the shares are None; the grams
-    still tell the story."""
+    """Net contribution of each source as grams and, when every source is a
+    source, as a share of the total. Shares are None as soon as any path is
+    negative (a remover): "+195 % / -98 %" is not a split anyone can read,
+    so the grams carry the story in that case. Also None when the total is
+    not positive."""
     total = out_g + room_g + diff_g
+    all_sources = out_g >= -1e-9 and room_g >= -1e-9 and diff_g >= -1e-9
     def pct(x):
-        return None if total <= 1e-9 else 100.0 * x / total
+        return None if (total <= 1e-9 or not all_sources) else 100.0 * x / total
     return {
         "outdoor_g": out_g, "room_g": room_g, "diffusion_g": diff_g, "total_g": total,
         "outdoor_pct": pct(out_g), "room_pct": pct(room_g), "diffusion_pct": pct(diff_g),

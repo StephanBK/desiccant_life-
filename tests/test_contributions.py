@@ -125,13 +125,14 @@ def test_split_is_exact_and_recovers_operating_humidity():
     assert split_vent_net(1.0, 0.0, w_out, 0.0, w_room, m, dt) == (0.0, 0.0)
 
 
-def test_shares_are_signed_and_sum_to_100():
-    c = contribution_shares(-5.0, 100.0, 5.0)
-    assert c["total_g"] == 100.0
-    assert c["outdoor_pct"] == pytest.approx(-5.0)
+def test_shares_only_when_every_path_is_a_source():
+    c = contribution_shares(40.0, 55.0, 5.0)
+    assert c["total_g"] == 100.0 and c["outdoor_pct"] == pytest.approx(40.0)
     assert c["room_pct"] + c["outdoor_pct"] + c["diffusion_pct"] == pytest.approx(100.0)
+    c = contribution_shares(-5.0, 100.0, 5.0)              # a remover: grams only
+    assert c["total_g"] == 100.0 and c["outdoor_pct"] is None and c["room_pct"] is None
     c = contribution_shares(-5.0, 2.0, 0.0)
-    assert c["total_g"] == -3.0 and c["outdoor_pct"] is None and c["room_pct"] is None
+    assert c["total_g"] == -3.0 and c["outdoor_pct"] is None
 
 
 def test_heating_season_calendar():

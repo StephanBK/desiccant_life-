@@ -282,3 +282,13 @@ button { cursor: pointer; }
 .source .hint { margin: 10px 0 0; font-size: 12px; color: var(--ink-3); }
 .summary .srcsum { color: var(--ink); font-weight: 600; }
 .table td.neg { color: #b3541e; }
+.srcbars { display: grid; gap: 6px; }
+.srcrow { display: grid; grid-template-columns: 120px 1fr 90px; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-2); }
+.srcrow b { text-align: right; color: var(--ink); }
+.srcrow b.neg { color: #b3541e; }
+.srctrack { position: relative; height: 12px; background: var(--line-2); border-radius: 6px; overflow: hidden; }
+.srctrack::before { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--ink-3); }
+.srctrack i { position: absolute; top: 0; bottom: 0; display: block; }
+.srcaxis { display: grid; grid-template-columns: 120px 1fr 90px; font-size: 11px; color: var(--ink-3); }
+.srcaxis span:first-child { grid-column: 2; text-align: left; padding-left: 0; }
+.srcaxis span:last-child { grid-column: 2; grid-row: 1; text-align: right; }

@@ -218,7 +218,7 @@ export default function Simulate({ result, busy }) {
     <>
       {busy && <div className="status">Running…</div>}
       <Headline h={headline} inputs={inputs} unit={unit} setUnit={setUnit} />
-      <SourceCard contributions={contributions} headline={headline} />
+      <SourceCard contributions={contributions} headline={headline} inputs={inputs} />
       {year1 && <Animation y1={year1} inputs={inputs} headline={headline} />}
       <LongChart daily={daily} headline={headline} />
       <Years years={years} />

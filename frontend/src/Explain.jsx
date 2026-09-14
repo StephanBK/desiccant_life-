@@ -1,5 +1,5 @@
 import { fmt } from './api.js'
-import { SourceBar, SourceLegend } from './Sources.jsx'
+import { SourceBar, SourceLegend, scaleWindow } from './Sources.jsx'
 
 const C = { glass: '#1f5fa8', water: '#1f9e9a', fog: '#d0642f', sand: '#9a7330', cold: '#6e8fb5', ink2: '#4b5a72', line: '#d5dce4' }
 
@@ -94,7 +94,7 @@ function FigSources({ c }) {
       <line x1={roomArrow.x1} y1="130" x2={roomArrow.x2} y2="130" stroke={C.water} strokeWidth={w(room)} strokeLinecap="round" /><polygon points={roomArrow.tip} fill={C.water} />
       <text x="150" y="60" textAnchor="middle" fontSize="11" fill={C.cold} fontWeight="700">{out >= 0 ? 'adds' : 'removes'} {fmt.n(Math.abs(out), Math.abs(out) < 10 ? 1 : 0)} g</text>
       <text x="150" y="160" textAnchor="middle" fontSize="11" fill={C.water} fontWeight="700">{room >= 0 ? 'adds' : 'removes'} {fmt.n(Math.abs(room), Math.abs(room) < 10 ? 1 : 0)} g</text>
-      <text x="150" y="110" textAnchor="middle" fontSize="11" fill={C.ink2}>net, over the sieve's life</text>
+      <text x="150" y="110" textAnchor="middle" fontSize="11" fill={C.ink2}>net, over the window</text>
     </svg>
   )
 }
@@ -202,7 +202,7 @@ export default function Explain({ result, presets, inp }) {
           {h && <Live rows={[['Full after', h.exhausted_hour === null ? 'not within run' : `${fmt.n(h.exhausted_hour)} h`], ['First fog', h.first_condensation_hour === null ? 'none' : `${fmt.n(h.first_condensation_hour)} h`], ['Hours per gram', h.hours_per_gram ?? '—']]} />}
         </Step>
 
-        <Step title="7. Where the water comes from" figure={<FigSources c={result?.contributions?.life} />}>
+        <Step title="7. Where the water comes from" figure={<FigSources c={result?.contributions ? scaleWindow(result.contributions.life, result.contributions.life_hours) : null} />}>
           <p>The supply in step 2 is a flow-weighted mix, so the water each path delivers can be split exactly. What matters is the sign: each path pushes the cavity toward its own humidity, so a path whose air is <em>drier</em> than the cavity carries water out. Cold outdoor air holds little water even at high RH, so in winter the outdoor path is usually a remover while the room path is the source, and the sum of the three is what the sieve and the pane took.</p>
           <div className="formula">{`N_out  = ACH_out · m_air · (W_out − W_cav) · dt
 N_in   = ACH_in  · m_air · (W_room − W_cav) · dt
@@ -211,8 +211,8 @@ N_out + N_in + N_bead = into sieve + onto pane + Δ(cavity air)
 N_out < 0 whenever W_out < W_cav: outdoor air carries water out`}</div>
           <p>A fresh sieve pulls the cavity to near zero humidity, so while it fills <em>every</em> path is a source, even the coldest outdoor air. Once the sieve is full or absent, the cavity rides at the mixed supply and the winter drying shows: over a year the two paths nearly cancel, so the year table also lists the October to March outdoor net on its own.</p>
           {result?.contributions && <>
-            <SourceBar c={result.contributions.life} height={12} />
-            <SourceLegend c={result.contributions.life} compact />
+            <SourceBar c={scaleWindow(result.contributions.life, result.contributions.life_hours)} height={12} />
+            <SourceLegend c={scaleWindow(result.contributions.life, result.contributions.life_hours)} compact />
           </>}
           {result?.years?.[0] && <Live rows={[
             ['Life window', result.headline.exhausted_hour !== null ? `${fmt.n(result.contributions.life_hours)} h to full` : `${result.headline.years_run} yr run`],
