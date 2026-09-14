@@ -67,6 +67,9 @@ export function SourceLegend({ c, compact }) {
   )
 }
 
+// The run-off sentence rests on two estimates from the pane model (film
+// cap 100 um, instant evaporation), so it is returned with a flag and the
+// card tags it.
 export function readingLine(c, grams, exhausted) {
   const unit = c.perYear ? ' g per year' : ' g'
   if (hasShares(c)) return `All three paths were sources: the cavity air next to a fresh sieve is drier than anything outside it. Together they delivered ${g1(c.total_g)}${unit}, which is what the sieve took.`
@@ -76,7 +79,12 @@ export function readingLine(c, grams, exhausted) {
   if (Math.abs(net) < 0.02 * Math.max(...SRC.map((s) => Math.abs(c[`${s.k}_g`])), 1e-9)) tail = 'Net about zero: what came in went back out; the pane only held water briefly.'
   else if (net > 0) tail = grams > 0 && exhausted ? `Net ${g1(net)}${unit} stayed in the cavity: the sieve took it until full, and what condensed after that ran off the pane.` : `Net ${g1(net)}${unit} stayed in the cavity, which with no sieve means it condensed on the pane and ran off.`
   else tail = `Net ${g1(-net)}${unit} left the cavity: it started wetter than the air around it.`
-  return `${parts[0].charAt(0).toUpperCase()}${parts.slice(1)}. ${tail}`
+  return `${parts.charAt(0).toUpperCase()}${parts.slice(1)}. ${tail}`
+}
+
+export function runoffIsEstimate(c) {
+  const big = Math.max(...SRC.map((s) => Math.abs(c[`${s.k}_g`])), 1e-9)
+  return !hasShares(c) && c.total_g > 0.02 * big
 }
 
 export function SourceCard({ contributions, headline, inputs }) {
@@ -94,7 +102,7 @@ export function SourceCard({ contributions, headline, inputs }) {
       </div>
       <SourceBar c={c} />
       <SourceLegend c={c} />
-      <p className="hint">{readingLine(c, inputs?.grams ?? 0, exhausted)} A path removes water when its air is drier than the cavity air: cold outdoor air in winter, room air in a humid summer.</p>
+      <p className="hint">{readingLine(c, inputs?.grams ?? 0, exhausted)}{runoffIsEstimate(c) && <> <span className="est">estimate</span> run-off depends on the 100 µm film cap and instant morning evaporation, both unmeasured.</>} A path removes water when its air is drier than the cavity air: cold outdoor air in winter, room air in a humid summer.</p>
     </div>
   )
 }
