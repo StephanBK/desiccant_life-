@@ -35,6 +35,10 @@ from engine.leakage import (
 )
 from engine.lifetime import LifetimeInputs, LifetimeResult, run_lifetime
 from engine.report import workbook_bytes
+from engine.pressure import (
+    CP_TABLE, DEFAULT_FLOOR_HEIGHT_M, DEFAULT_FLOORS, DEFAULT_OCC_END_H, DEFAULT_OCC_START_H,
+    DEFAULT_P_OCCUPIED_PA, DEFAULT_P_UNOCCUPIED_PA, DEFAULT_WINDOW_FLOOR, HvacSchedule,
+)
 from engine.solar import ORIENTATIONS, poa_series
 from engine.sweep import SWEEPABLE, sweep_1d, sweep_2d
 from engine.weather import WeatherError, get_weather_for_address
@@ -58,6 +62,12 @@ DEFAULTS = {
     "sealant_out": DEFAULT_SEALANT, "sealant_in": DEFAULT_SEALANT, "bead_width_in": 0.25, "bead_depth_in": 0.25,
     "grams": 1000.0, "desiccant": DEFAULT_DESICCANT,
     "orientation": "south", "absorptance": 0.10,
+    # Signed pressure model (engine.pressure): HVAC schedule, stack from
+    # floor position, wind by direction against the facade.
+    "p_occ_pa": DEFAULT_P_OCCUPIED_PA, "p_unocc_pa": DEFAULT_P_UNOCCUPIED_PA,
+    "occ_start_h": DEFAULT_OCC_START_H, "occ_end_h": DEFAULT_OCC_END_H, "weekdays_only": True,
+    "floors": DEFAULT_FLOORS, "window_floor": DEFAULT_WINDOW_FLOOR, "floor_height_ft": round(DEFAULT_FLOOR_HEIGHT_M / 0.3048, 2),
+    "series_model": True, "breathing": True,
 }
 
 
@@ -164,6 +174,13 @@ def _parse_inputs() -> tuple[LifetimeInputs, dict]:
     raw_tau = request.args.get("tau_h")
 
     try:
+        hvac = HvacSchedule(
+            occupied_pa=_float("p_occ_pa", DEFAULTS["p_occ_pa"], -75.0, 75.0),
+            unoccupied_pa=_float("p_unocc_pa", DEFAULTS["p_unocc_pa"], -75.0, 75.0),
+            start_h=_int("occ_start_h", DEFAULTS["occ_start_h"], 0, 24),
+            end_h=_int("occ_end_h", DEFAULTS["occ_end_h"], 0, 24),
+            weekdays_only=_bool("weekdays_only", DEFAULTS["weekdays_only"]),
+        )
         inp = LifetimeInputs(
             geometry=geometry, f_cold=f_cold, f_warm=f_warm, u_assembly=u_si,
             t_room_c=psychro.f_to_c(_float("t_in", DEFAULTS["t_in_f"], 40.0, 100.0)),
@@ -174,6 +191,13 @@ def _parse_inputs() -> tuple[LifetimeInputs, dict]:
             ach_out=_ach("ach_out", {}, "0") if request.args.get("ach_out") else 0.0,
             ach_in=_ach("ach_in", {}, "0") if request.args.get("ach_in") else 0.0,
             dp_pa=_float("dp_pa", DEFAULTS["dp_pa"], 0.0, 75.0),
+            series_model=_bool("series_model", DEFAULTS["series_model"]),
+            breathing=_bool("breathing", DEFAULTS["breathing"]),
+            hvac=hvac,
+            building_floors=_int("floors", DEFAULTS["floors"], 1, 200),
+            window_floor=_int("window_floor", DEFAULTS["window_floor"], 1, 200),
+            floor_height_m=_float("floor_height_ft", DEFAULTS["floor_height_ft"], 6.0, 30.0) * 0.3048,
+            facade_azimuth_deg=ORIENTATIONS[orientation],
             sealant_out=_choice("sealant_out", SEALANTS, DEFAULTS["sealant_out"]),
             sealant_in=_choice("sealant_in", SEALANTS, DEFAULTS["sealant_in"]),
             bead_width_m=_float("bead_width_in", DEFAULTS["bead_width_in"], 0.0, 2.0) * 0.0254,
@@ -202,6 +226,13 @@ def _parse_inputs() -> tuple[LifetimeInputs, dict]:
         "t_in_f": round(psychro.c_to_f(inp.t_room_c), 2), "rh_in_pct": inp.rh_room * 100.0,
         "al_out": inp.al_out, "al_in": inp.al_in, "dp_pa": inp.dp_pa,
         "ach_out": round(inp.ach_out, 4), "ach_in": round(inp.ach_in, 4), "wind_scaling": inp.wind_scaling,
+        "series_model": inp.uses_series_model, "breathing": inp.breathing,
+        "p_occ_pa": hvac.occupied_pa, "p_unocc_pa": hvac.unoccupied_pa,
+        "occ_start_h": hvac.start_h, "occ_end_h": hvac.end_h, "weekdays_only": hvac.weekdays_only,
+        "floors": inp.building_floors, "window_floor": inp.window_floor,
+        "floor_height_ft": round(inp.floor_height_m / 0.3048, 2),
+        "height_above_npl_ft": round(inp.height_above_npl_m / 0.3048, 1),
+        "facade_azimuth_deg": inp.facade_azimuth_deg,
         "sealant_out": inp.sealant_out, "sealant_in": inp.sealant_in,
         "bead_width_in": round(inp.bead_width_m / 0.0254, 3), "bead_depth_in": round(inp.bead_depth_m / 0.0254, 3),
         "diffusion_g_per_day": round(24 * 1000 * (
@@ -307,6 +338,8 @@ def _result_payload(r: LifetimeResult, echo: dict, location, weather, cached: bo
             "uptake_g": _round_list(y1["uptake_g"], 4),
             "condensed_g": _round_list(y1["condensed_g"], 4),
             "ach_out": _round_list(y1["ach_out"], 3),
+            "ach_total": _round_list(tb.ach_total, 4),
+            "dp_pa": _round_list(tb.dp_pa, 2),
             "w_supply_gkg": _round_list([x * 1000 for x in tb.w_supply], 3),
             "vent_rise_f": _round_list([x * 1.8 for x in tb.vent_rise_k], 3),
         }
@@ -317,15 +350,19 @@ ASSUMPTIONS = [
     "3A isotherm constants are fitted to published vendor curves, not to a supplier sheet.",
     "Desiccant time constant (default 2 h) is an estimate; a vendor can measure it.",
     "Leakage presets: AERC baseline (2.0) and best certified insert (0.06 cfm/ft2) are published; the values between are estimates.",
-    "Cavity ACH from rated leakage assumes an operating pressure (default 3 Pa) and the 0.65 crack-flow exponent; uncertainty about a factor of 3.",
-    "Wind adds 0.5 rho v^2 Cp (Cp 0.6) to the outdoor path's operating pressure (toggle).",
+    "The two layers are in SERIES: one signed room-to-outdoor pressure per hour (HVAC schedule + stack + wind), the same air passes both layers, the tighter layer takes most of the pressure and sets the flow, and the cavity is fed from the high-pressure side only. Crack-flow exponent 0.65.",
+    "HVAC pressurisation defaults +5 Pa occupied (weekdays 07 to 19), 0 Pa unoccupied: the low end of the 5 to 25 Pa design range, matching field measurements in existing buildings. ESTIMATE; the value is a parameter.",
+    "Stack pressure from the window's height above a mid-height neutral plane (uniform leakage assumed); building height and floor are parameters.",
+    "Wind pressure 0.5 rho v^2 Cp with Cp from the wind angle off the facade (+0.6 windward, -0.5 side, -0.3 leeward; ESTIMATE from face-averaged values). Station wind at 10 m, no height or terrain correction. If the weather file lacks wind direction, every windy hour is treated as windward (conservative).",
+    "Thermal breathing (cavity air contracting as it cools, drawing in from both sides in proportion to their leakage) is included; gust pumping (compression by dP/P_atm per gust through one leaky layer) is not, and only matters below about 0.01 ACH.",
     "Wet-sealed preset (0.005 cfm/ft2) is the ASTM E283 detection floor, not a measurement of INOVUES seals; a cavity pressurisation test would replace it.",
     "Sealant vapour diffusion uses ASTM E96 permeability ranges (silicone 30, PIB 0.3 g.mm/m2/day) with the cavity taken as dry: an upper bound on the floor.",
     "Pane warming from vent air is an upper bound.",
     "Evaporation from the pane is instantaneous up to saturation (upper bound on drying).",
     "Retained film cap 100 um; visible threshold 5 um; both unmeasured.",
     "'Exhausted' = 95 % of 25 degC capacity; at 35 % room RH the sieve equilibrates at 96.7 %, so thresholds above that never fire.",
-    "Leakage paths are treated as independent at the same operating pressure; a single-sided stack loop estimate gives about half the exchange, so supply is likely overestimated by ~2x (conservative on life).",
+    "Lifetime is set almost entirely by the TIGHTER layer (for INOVUES, the SWR seal) and, once that is airtight, by the sealant's vapour permeability; the old window's leakage mostly decides which air fills the cavity, not how much.",
+    "The two hermetic / wet-sealed presets bracket one unknown: what a field-applied silicone wet seal actually leaks. Weeks at the E283 floor, years at IGU-grade. A cavity pressure-decay test on an installed unit is the measurement that settles it.",
     "TMY year repeated; no climate trend, no year-to-year variation.",
 ]
 
@@ -354,6 +391,7 @@ def presets():
         "sealants": [asdict(v) for v in SEALANTS.values()],
         "leakage_reference": {
             "test_pressure_pa": 75.0, "flow_exponent": 0.65, "default_operating_pa": DEFAULT_OPERATING_PA,
+            "cp_table": [{"angle_deg": a, "cp": c} for a, c in CP_TABLE],
             "aerc_url": "https://aercenergyrating.org/product-search/commercial-product-search/",
             "note": "Air leakage in cfm/ft2 at 75 Pa per ASTM E283 / AERC. Cavity ACH = AL x 18.29 x (dP/75)^0.65 / offset.",
         },

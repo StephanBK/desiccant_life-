@@ -118,6 +118,7 @@ class LeakagePreset:
 
 #: Existing window: leakage from OUTDOORS into the cavity. Tightest first.
 EXISTING_PRESETS: list[LeakagePreset] = [
+    LeakagePreset("hermetic", "Hermetic, IGU-grade (diffusion only)", 0.0, "Estimate: no crack flow at all; see the retrofit preset of the same name", True),
     LeakagePreset("wet_sealed", "Wet-sealed, continuous bead", 0.005, "Estimate: continuous silicone bead over all joints, at the ASTM E283 detection floor; verify by cavity pressurisation test", True),
     LeakagePreset("new_fixed", "New fixed window", 0.06, "AAMA/ASTM E283 fixed-window specification", False),
     LeakagePreset("resealed", "Freshly resealed", 0.10, "Estimate: wet-sealed perimeter, serviceable gaskets", True),
@@ -128,6 +129,7 @@ EXISTING_PRESETS: list[LeakagePreset] = [
 
 #: Retrofit: leakage from the ROOM into the cavity. Tightest first.
 RETROFIT_PRESETS: list[LeakagePreset] = [
+    LeakagePreset("hermetic", "Hermetic, IGU-grade (diffusion only)", 0.0, "Estimate: no crack flow at all, as an insulating-glass edge seal; sealant vapour diffusion and thermal breathing remain. UNVERIFIED for a field-applied wet seal; the E283 floor below is the other end of the same unknown", True),
     LeakagePreset("wet_sealed", "Wet-sealed, continuous bead", 0.005, "Estimate: INOVUES practice, continuous silicone bead on a fixed frame, at the ASTM E283 detection floor; verify by cavity pressurisation test", True),
     LeakagePreset("gasketed", "Well-gasketed fixed insert", 0.01, "Estimate: compression gasket on all four sides", True),
     LeakagePreset("certified_best", "Best certified insert", 0.06, "AERC best-in-class (Alpen WinSert, Dec 2021)", False),
