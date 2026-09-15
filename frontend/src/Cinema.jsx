@@ -129,7 +129,7 @@ export default function Cinema({ result, active }) {
             {beads.map((b) => <circle key={b.k} cx={b.x} cy={b.y} r={R} fill={beadFill(load, b.thr)} />)}
             <rect x={VX} y={VY} width={VW} height={VH} rx="18" fill="url(#glass)" pointerEvents="none" />
             {/* incoming moisture: drifting motes whose count follows exchange rate */}
-            {playing && !isFull && Array.from({ length: Math.min(14, Math.round(Math.log10(1 + (inp.ach_out + inp.ach_in)) * 6)) }, (_, i) => (
+            {playing && !isFull && Array.from({ length: Math.min(14, Math.round(Math.log10(1 + (result?.pressure?.mean_ach ?? (inp.ach_out + inp.ach_in))) * 6)) }, (_, i) => (
               <circle key={`m${i}`} className="mote" style={{ animationDelay: `${(i * 0.37) % 2.6}s`, animationDuration: `${2.2 + (i % 4) * 0.4}s` }} cx={VX - 20} cy={VY + 30 + (i * 37) % (VH - 60)} r="2.2" filter="url(#glow)" />
             ))}
           </svg>
@@ -161,7 +161,7 @@ export default function Cinema({ result, active }) {
           {fogDay !== null && <i style={{ left: `${100 * fogDay / Math.max(1, n - 1)}%`, background: '#d0642f' }} title="first fog" />}
           {Array.from({ length: Math.floor((n - 1) / 365) }, (_, i) => <em key={i} style={{ left: `${100 * (365 * (i + 1)) / Math.max(1, n - 1)}%` }} />)}
         </div>
-        <div className="cin-foot"><span>{inp.address}</span><span>existing {inp.al_out} · retrofit {inp.al_in} cfm/ft² · {fmt.g(inp.ach_out + inp.ach_in)} ACH</span><span>{inp.t_in_f} °F / {inp.rh_in_pct} % RH room</span><span>day {day + 1} of {n}</span></div>
+        <div className="cin-foot"><span>{inp.address}</span><span>existing {inp.al_out} · retrofit {inp.al_in} cfm/ft² · {fmt.g(result?.pressure?.mean_ach ?? (inp.ach_out + inp.ach_in))} ACH mean exchange</span><span>{inp.t_in_f} °F / {inp.rh_in_pct} % RH room</span><span>day {day + 1} of {n}</span></div>
       </div>
     </div>
   )

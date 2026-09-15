@@ -22,8 +22,8 @@ export const TIPS = {
   },
   height_in: {
     what: 'Clear height of the glazed cavity, inches.',
-    how: 'As width. Also the stack height for buoyancy pressure, though the model takes operating pressure as an input rather than computing it.',
-    src: 'Default 96 in. Stack pressure over 8 ft at 25 K ≈ 2.5 Pa (engine/leakage.py).',
+    how: 'As width. Also the chimney height of each layer\'s single-sided loop: ΔP_loop = |ρ_side − ρ_cavity|·g·k·H, so a taller window breathes more through the same cracks.',
+    src: 'Default 96 in. At 8 K and k = 0.75 the loop pressure over 8 ft is about 0.7 Pa (engine/pressure.py).',
   },
   offset_in: {
     what: 'Air gap between the existing pane and the retrofit IGU, inches.',
@@ -222,7 +222,7 @@ export const TIPS = {
   },
   out_source: {
     what: 'Net water each path delivered to the cavity over the sieve\'s life (to the hour it is full; the whole run if it never fills): outdoor air through the existing window, room air through the retrofit, and vapour diffusion through the sealant bead.',
-    how: 'Each hour the solved cavity humidity W is compared with each path\'s own: N = ACH · m_air · (W_path − W) · dt. The split is exact because the supply is a flow-weighted mean. A negative value is a path that carried water OUT, which cold, dry outdoor air does in winter. Shares are shown only when every path is a source (a fresh sieve makes the cavity drier than anything around it); once any path is a remover the card shows adds and removes in grams instead. Windows longer than a year are shown per year.',
+    how: 'Each hour the solved cavity humidity W is compared with each path\'s own: N = ACH · m_air · (W_path − W) · dt. The split is exact because the supply is a flow-weighted mean. A negative value is a path that carried water OUT, which cold, dry outdoor air does in winter. Shares are shown only when every path is a source (a fresh sieve makes the cavity drier than anything around it); once any path is a remover the card shows adds and removes in grams instead. Windows longer than a year are shown per year, with the life total against capacity in the reading line.',
     src: 'engine/lifetime.py split_vent_net, contribution_shares; tests/test_contributions.py.',
   },
   out_pane: {
@@ -242,7 +242,7 @@ export const TIPS = {
   },
   out_supply: {
     what: 'Humidity ratio of the mixed supply air, g water per kg dry air.',
-    how: 'W_sup = (ACH_out·W_out + ACH_in·W_room) / (ACH_out + ACH_in). Water delivered per hour = (ACH_out + ACH_in) × m_cav × W_sup when the cavity is dry.',
+    how: 'W_sup = (ACH_out·W_out + ACH_in·W_room) / (ACH_out + ACH_in), where each ACH is that hour\'s real inflow from its side (through-flow on the high-pressure side, plus that layer\'s loop and breathing share). Water delivered per hour = (ACH_out + ACH_in) × m_cav × W_sup when the cavity is dry.',
     src: 'engine/lifetime.py build_tables.',
   },
   out_loading: {
@@ -271,9 +271,19 @@ export const TIPS = {
     src: 'engine/cavity.py vent_cold_surface_rise_two_path.',
   },
   out_achout: {
-    what: 'Outdoor-path air changes per hour this hour, including wind.',
-    how: 'ACH = AL × 18.29 × ((dp + 0.5ρv²Cp)/75)^0.65 / offset.',
-    src: 'engine/leakage.py.',
+    what: 'Outdoor air entering the cavity this hour, air changes per hour.',
+    how: 'Through-flow when the signed pressure is negative (outdoors higher: wind, or stack below the neutral plane in winter), plus the single-sided loop through the existing window, plus the outdoor share of breathing.',
+    src: 'engine/pressure.py hour_flow.',
+  },
+  out_achin: {
+    what: 'Room air entering the cavity this hour, air changes per hour.',
+    how: 'Through-flow when the signed pressure is positive (HVAC pressurisation, stack above the neutral plane in winter, leeward suction outside), plus the single-sided loop through the retrofit, plus the room share of breathing. Never both through-flows in the same hour.',
+    src: 'engine/pressure.py hour_flow.',
+  },
+  out_dp: {
+    what: 'Signed pressure difference this hour, room minus outdoors, Pa.',
+    how: 'HVAC schedule + stack from the floor position + wind by direction against the facade. Positive feeds room air through the retrofit; negative feeds outdoor air through the existing window; the size sets the through-flow as |ΔP|^0.65 across both layers in series.',
+    src: 'engine/pressure.py.',
   },
   ach_derived: {
     what: 'Air changes this layer ALONE would give at the reference pressure. Not what the run uses: the run solves both layers in series at the signed hourly pressure, so the through-flow is at most the tighter layer\'s value here.',

@@ -5,9 +5,10 @@ import { api, fmt } from './api.js'
 // User-unit labels for each sweepable engine key.
 const AXES = {
   desiccant_grams: { label: 'Desiccant mass', unit: 'g', from: 10, to: 1000, log: true },
-  al_out: { label: 'Existing-window leakage', unit: 'cfm/ft²', from: 0.06, to: 2, log: true },
+  al_out: { label: 'Existing-window leakage', unit: 'cfm/ft²', from: 0.0002, to: 2, log: true },
   al_in: { label: 'Retrofit leakage', unit: 'cfm/ft²', from: 0.0002, to: 2, log: true },
-  dp_pa: { label: 'Operating pressure', unit: 'Pa', from: 1, to: 10, log: false },
+  p_occ_pa: { label: 'HVAC pressure, occupied', unit: 'Pa', from: -5, to: 15, log: false },
+  loop_k: { label: 'Loop crack placement k', unit: '', from: 0, to: 1, log: false },
   rh_room: { label: 'Room RH', unit: '%', from: 20, to: 60, log: false },
   t_room_c: { label: 'Room temperature', unit: '°F', from: 62, to: 78, log: false },
   width_m: { label: 'Cavity width', unit: 'in', from: 24, to: 120, log: false },

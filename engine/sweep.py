@@ -26,7 +26,8 @@ SWEEPABLE: dict[str, dict] = {
     "desiccant_grams": {"label": "Desiccant mass", "unit": "g", "tables": False},
     "al_out": {"label": "Existing-window air leakage", "unit": "cfm/ft2 @75Pa", "tables": True},
     "al_in": {"label": "Retrofit air leakage", "unit": "cfm/ft2 @75Pa", "tables": True},
-    "dp_pa": {"label": "Operating pressure", "unit": "Pa", "tables": True},
+    "p_occ_pa": {"label": "HVAC pressurisation, occupied", "unit": "Pa", "tables": True},
+    "loop_k": {"label": "Loop crack placement k", "unit": "fraction of height", "tables": True},
     "ach_out": {"label": "Outdoor leakage (raw)", "unit": "ACH", "tables": True},
     "ach_in": {"label": "Room-side vent (raw)", "unit": "ACH", "tables": True},
     "rh_room": {"label": "Room RH", "unit": "fraction", "tables": True},
@@ -56,6 +57,8 @@ def _with(inp: LifetimeInputs, key: str, value: float) -> LifetimeInputs:
         return replace(inp, ach_out=value, al_out=None)
     if key == "ach_in":
         return replace(inp, ach_in=value, al_in=None)
+    if key == "p_occ_pa":
+        return replace(inp, hvac=replace(inp.hvac, occupied_pa=value))
     return replace(inp, **{key: value})
 
 

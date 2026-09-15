@@ -100,7 +100,7 @@ function Animation({ y1, inputs, headline }) {
   return (
     <div className="card">
       <h2>Play the first year</h2>
-      <p className="lede">Air streams scale with leakage, beads darken as the sieve fills, and an amber film climbs the existing pane when the cavity dew point beats its temperature.</p>
+      <p className="lede">Air streams follow the hour's pressure and the loops, beads darken as the sieve fills, and an amber film climbs the existing pane when the cavity dew point beats its temperature.</p>
       <div className="anim">
         <div>
           <div className="stage"><Cavity frame={frame} inputs={inputs} /></div>
@@ -123,7 +123,9 @@ function Animation({ y1, inputs, headline }) {
             <Row label="taken up this hour" tip="out_uptake" value={`${(frame.uptake_g * 1000)?.toFixed(1)} mg`} />
             <Row label="film on pane" color={C.fog} tip="out_film" value={`${frame.film_um?.toFixed(2)} µm`} />
             <Row label="vent warming" tip="out_vent" value={`${frame.vent_rise_f?.toFixed(2)} °F`} />
-            <Row label="outdoor leakage now" tip="out_achout" value={`${frame.ach_out?.toFixed(3)} ACH`} />
+            <Row label="outdoor air in now" tip="out_achout" value={`${frame.ach_out?.toFixed(3)} ACH`} />
+            <Row label="room air in now" tip="out_achin" value={`${((frame.ach_total ?? 0) - (frame.ach_out ?? 0)).toFixed(3)} ACH`} />
+            <Row label="pressure, room minus outdoors" tip="out_dp" value={frame.dp_pa !== undefined ? `${frame.dp_pa.toFixed(1)} Pa` : '—'} />
           </div>
         </div>
         <div>

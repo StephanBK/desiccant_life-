@@ -1,9 +1,8 @@
 # HANDOVER — Desiccant Lifetime Simulator (ANLY-003)
 
 Last session: 2026-09-15 (session 4). State: v0.5 (series pressure
-model) committed locally on top of cefd881; main on GitHub is at
-cefd881 and Railway serves that. v0.5 not yet pushed: Stephan pushes
-with his PAT from the patch bundle.
+model + single-sided loops) pushed: main on GitHub at 2748f2b + the
+tab-consistency commit after it, Railway serves it.
 
 ## Session 4 (2026-09-15): the two layers were in parallel; now in series
 

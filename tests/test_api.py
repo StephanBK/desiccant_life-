@@ -109,6 +109,15 @@ def test_sweep_2d_user_units(client):
     assert d["grid"][1][1]["y"] == 75 and d["grid"][0][1]["x"] == 100
 
 
+def test_sweep_pressure_model_axes(client):
+    d = client.get("/api/sweep?x_key=loop_k&x_values=0,1&trace=0&sweep_max_years=2").get_json()
+    hours = [pt["exhausted_hour"] for pt in d["points"]]
+    assert hours[0] is not None and hours[1] is not None and hours[1] < hours[0]
+    e = client.get("/api/sweep?x_key=p_occ_pa&x_values=0,12&trace=0&sweep_max_years=2").get_json()
+    assert len(e["points"]) == 2 and e["points"][0]["exhausted_hour"] != e["points"][1]["exhausted_hour"]
+    assert client.get("/api/sweep?x_key=dp_pa&x_values=1,5&trace=0").status_code == 400
+
+
 def test_sweep_rejects(client):
     assert client.get("/api/sweep?x_key=moon&x_values=1").status_code == 400
     assert client.get("/api/sweep?x_key=ach_in&x_values=1&y_key=ach_in&y_values=2").status_code == 400

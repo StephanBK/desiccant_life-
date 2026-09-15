@@ -79,7 +79,7 @@ export default function Cavity({ frame, inputs }) {
 
       {/* streams */}
       <Stream x={paneX - 4} y1={top + 40} y2={top + 130} dir={1} strength={f.ach_out ?? 0} color="#1f5fa8" label={f.ach_out !== undefined ? `${f.ach_out.toFixed(2)} ACH` : ''} />
-      <Stream x={iguX + iguW + 4} y1={top + 40} y2={top + 130} dir={-1} strength={inputs?.ach_in ?? 0} color="#1f9e9a" label={inputs ? `${Number(inputs.ach_in).toFixed(2)} ACH` : ''} />
+      <Stream x={iguX + iguW + 4} y1={top + 40} y2={top + 130} dir={-1} strength={f.ach_total !== undefined ? Math.max(0, f.ach_total - (f.ach_out ?? 0)) : (inputs?.ach_in ?? 0)} color="#1f9e9a" label={f.ach_total !== undefined ? `${Math.max(0, f.ach_total - (f.ach_out ?? 0)).toFixed(2)} ACH` : (inputs ? `${Number(inputs.ach_in).toFixed(2)} ACH` : '')} />
 
       {/* desiccant bed */}
       <rect x={bedX - 4} y={bedTop - 4} width={beadCols * 11 + 8} height={beadRows * 11 + 8} rx="4" fill="#ffffff" stroke="#c99c55" strokeWidth="1.5" />
