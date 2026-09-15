@@ -34,7 +34,9 @@ def client(monkeypatch, year):
 def test_presets_shape(client):
     d = client.get("/api/presets").get_json()
     assert d["defaults"]["al_out"] == "wet_sealed" and d["defaults"]["al_in"] == "wet_sealed"
-    assert [p["key"] for p in d["al_out"]][0] == "wet_sealed" and [p["key"] for p in d["al_in"]][0] == "wet_sealed"
+    assert [p["key"] for p in d["al_out"]][:2] == ["hermetic", "wet_sealed"] and [p["key"] for p in d["al_in"]][:2] == ["hermetic", "wet_sealed"]
+    assert d["leakage_reference"]["cp_table"][0] == {"angle_deg": 0.0, "cp": 0.6}
+    assert d["defaults"]["p_occ_pa"] == 5.0 and d["defaults"]["p_unocc_pa"] == 0.0
     assert {v["key"] for v in d["sealants"]} == {"silicone", "pib", "none"}
     assert d["leakage_reference"]["aerc_url"].startswith("https://aercenergyrating.org")
     assert d["desiccants"][0]["key"] == "ms3a"
