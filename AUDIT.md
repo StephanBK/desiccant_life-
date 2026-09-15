@@ -241,11 +241,31 @@ substep"):
 
 **Verification.** engine/pressure.py closed form checked against a 200-step bisection of C_out·x^n = C_in·(ΔP − x)^n (tests/test_pressure.py). Series run with constant +12 Pa, no wind, no stack reproduces the legacy engine fed with the same ACH on the room path only, to 1e-4 (tests/test_series_equivalence.py): the rework touched only how the ACH and its side are decided. Property tests: one side fed per hour; through-flow never exceeds the tighter layer alone at the full |ΔP|; tightening a layer never raises flow; a hermetic layer leaves breathing only; fed side follows the sign (tests/test_properties.py).
 
-**Consequence for the product.** The lifetime is set by the tighter layer, for INOVUES the retrofit seal, and once that is airtight by the sealant's vapour permeability (silicone ≈ 30 g/yr for the fixture window, which alone caps 1000 g of 3A at ≈ 6 yr; PIB 100× less). Sweep on the fixture, old window 0.30, retrofit rating swept: 0.005 → 0.13 yr; 0.001 → 0.48 yr; 0.0002 → 1.7 yr; 0.0001 → 2.7 yr; 0.0 → 6.0 yr. The E283 detection floor (0.005) is not hermetic. The presets now bracket the unknown with "Hermetic, IGU-grade" (0.0) and "Wet-sealed" (0.005). A cavity pressure-decay test on an installed unit is the measurement that replaces both.
+**Second correction, same day: the series model alone dropped single-sided exchange.** With one layer hermetic, through-flow is zero, but the other layer still exchanges air with its own side through its own cracks. The dominant mechanism is a buoyant loop: the cavity air differs in temperature from the side beyond the layer; the layer has cracks low and high; air of one density leaves at one end and the other comes in at the other. The old audit's "single-sided stack loop estimate" was a rough version of this and was lost in the first rework. Now in engine/pressure.py:
+
+    dP_loop = |ρ_side − ρ_cavity| · g · k · H_window
+    q_loop  = (C/2) · (dP_loop/2)^n_loop            k = 0.75, n_loop = 0.65, both parameters, ESTIMATES
+
+k is the fraction of the window height between the average inlet and the average outlet of the loop (1 all at head and sill, 0.5 spread evenly, 0 all at one height). n_loop = 0.65 extrapolates the 75 Pa rating down to ~0.3 Pa with the same exponent; flow there is probably laminar (n → 1), which would give up to 6× less; 0.65 is the conservative choice for life. Loops are superposed on the through-flow (the standard practice; the interaction is second order). Cavity temperature for the loop is the previous hour's. Not modelled: gust pumping (ΔP/P_atm ≈ 1e-4 per gust) and the wind-pressure gradient over the face, both second order to the buoyant loop.
+
+Verification: hand calculation of dP_loop and q_loop (tests/test_pressure.py); loops zero for a hermetic layer or k = 0, never negative, never lower the total exchange, shrink with k, grow with window height (tests/test_properties.py). The series-to-legacy equivalence test runs with loops off.
+
+**Consequence for the product (corrected).** Sweep on the fixture (60×96×0.6 in, 1000 g 3A, mean ACH over the year as through-flow + loop out + loop in):
+
+    old window  retrofit   through  loop_out  loop_in   total    1000 g full after
+    0.30        0.005      0.65     3.52      0.07      4.24     0.02 yr (1 week)
+    0.30        0.0        0.00     3.52      0         3.52     0.02 yr
+    0.005       0.005      0.42     0.06      0.07      0.54     0.13 yr
+    0.005       0.0        0.00     0.06      0         0.06     0.89 yr
+    0.001       0.001      0.08     0.01      0.01      0.11     0.56 yr
+    0.0         0.0        0.00     0         0         0.0006   6.3 yr (silicone diffusion floor)
+
+A hermetic retrofit over an unsealed old window buys nothing: the old window's loop alone feeds the cavity 3.5 ACH of outdoor air. Both seals matter; the tighter layer sets the through-flow, each layer's own leakage sets its loop. Years require both layers well below the E283 floor, and then the silicone bead's vapour permeability (≈ 30 g/yr here) is the cap; PIB is 100× lower. The measurement that settles this is a cavity pressure-decay test on an installed unit, which gives the COMBINED leakage of both layers; a second test with the retrofit's vent taped separates them.
 
 **Revised ranking (replaces §1 rows 1 and 4).**
-1. Retrofit seal leakage below the E283 floor: decides weeks vs years. Unmeasured.
-2. Sealant vapour permeability (silicone vs PIB): the floor once 1 is airtight. Published ranges only.
-3. HVAC pressurisation and its schedule: decides room-fed vs outdoor-fed hours; ±factor 1.5 on flow between 0 and 12 Pa.
-4. C_p table and the missing height/terrain correction: ±factor 1.5 on windy-hour flow.
-5. Neutral plane position: ±3 Pa on tall buildings.
+1. Leakage of BOTH layers below the E283 floor: decides weeks vs years. Unmeasured.
+2. Loop crack placement k and the sub-1 Pa exponent: ±factor 6 on the loop, which dominates in the near-hermetic case.
+3. Sealant vapour permeability (silicone vs PIB): the floor once both are airtight. Published ranges only.
+4. HVAC pressurisation and its schedule: decides room-fed vs outdoor-fed through-flow hours; ±factor 1.5 between 0 and 12 Pa.
+5. C_p table and the missing height/terrain correction: ±factor 1.5 on windy-hour through-flow.
+6. Neutral plane position: ±3 Pa on tall buildings.

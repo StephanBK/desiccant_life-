@@ -21,12 +21,19 @@ with his PAT from the patch bundle.
   ACH inputs; cross-check and 0 g equivalence tests run on that path
   and still pass. New tests/test_series_equivalence.py ties series to
   legacy exactly at constant dP.
-- FINDING: series cut modelled flow 4x to 90x but lifetime is still
-  weeks at the E283 floor (0.005 cfm/ft2) and ~6 yr at true hermetic,
-  capped by silicone bead diffusion (~30 g/yr). Retrofit seal leakage
-  below the E283 floor is THE unknown; cavity pressure-decay test on an
-  installed unit is the measurement. New "Hermetic, IGU-grade" (0.0)
-  preset brackets it with "Wet-sealed" (0.005).
+- Stephan then asked whether outdoors still exchanges air with the
+  cavity through the old window alone. It does (buoyant loop through
+  one layer's own cracks; the old audit's "single-sided stack loop"
+  that the first rework dropped). Added: loops per layer, dP_loop =
+  |rho_side - rho_cav| g k H, k = 0.75 and n = 0.65 as parameters
+  (loops, loop_k, loop_n in the API). Both seals matter now.
+- FINDING (corrected): unsealed old window + hermetic retrofit = 1
+  week (3.5 ACH loop through the old window). Both at E283 floor 0.13
+  yr; old at floor + retrofit hermetic 0.89 yr; both hermetic 6.3 yr
+  (silicone diffusion floor). Leakage of BOTH layers below the floor is
+  THE unknown; cavity pressure-decay test on an installed unit (plus a
+  second with the vent taped) is the measurement. "Hermetic,
+  IGU-grade" (0.0) preset brackets it with "Wet-sealed" (0.005).
 - Property test slack for "more leakage never lengthens life" widened
   to one desiccant time constant (1 g sieve filling in 11 h).
 - Open: gust pumping not modelled (only matters below ~0.01 ACH); Cp

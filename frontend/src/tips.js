@@ -49,7 +49,7 @@ export const TIPS = {
   al_out: {
     what: 'Rated air leakage of the EXISTING window, cfm/ft² of window area at a 75 Pa test pressure (ASTM E283 / NFRC 400, the AERC certificate number).',
     how: 'Converted to a flow coefficient C = AL × 18.29 / 75^0.65 (m³/h per m² per Pa^0.65). The two layers are in SERIES: one signed pressure difference room-to-outdoor per hour, the same air passes both, the tighter layer takes most of the pressure and sets the flow. Outdoor air enters only in hours when outdoor pressure is the higher one (wind, or stack below the neutral plane in winter).',
-    src: 'Published anchors: AERC baseline single-pane 2.0; new fixed commercial spec 0.06 (ticked). Values between are estimates. Once the retrofit is tighter than this layer, this number mostly decides WHICH air fills the cavity, not how much (AUDIT §7).',
+    src: 'Published anchors: AERC baseline single-pane 2.0; new fixed commercial spec 0.06 (ticked). Values between are estimates. Even with a hermetic retrofit this layer breathes outdoor air through its own cracks (single-sided loop), so it matters on its own (AUDIT §6).',
   },
   wind_scaling: {
     what: 'Legacy toggle. Only used when leakage is given as bare ACH (the parallel model); with rated leakage the wind enters the signed pressure model as 0.5·ρ·v²·Cp by direction.',
@@ -58,7 +58,7 @@ export const TIPS = {
   },
   al_in: {
     what: 'Rated air leakage of the RETROFIT (the secondary window), cfm/ft² at 75 Pa.',
-    how: 'Same coefficient. In series with the existing window; room air enters only in hours when room pressure is the higher one (HVAC pressurisation, stack above the neutral plane in winter, leeward suction outside). For INOVUES this is the tighter layer, so it sets the through-flow and therefore the lifetime.',
+    how: 'Same coefficient. In series with the existing window; room air enters only in hours when room pressure is the higher one (HVAC pressurisation, stack above the neutral plane in winter, leeward suction outside). Plus its own single-sided loop with the room. The tighter of the two layers sets the through-flow; each layer\'s own leakage sets its loop.',
     src: 'AERC best certified insert 0.06 (Alpen WinSert, Dec 2021, ticked). Wet-sealed 0.005 is the ASTM E283 detection floor, not a measurement; Hermetic 0.0 is the IGU-grade other end of the same unknown. Weeks at the floor, years at hermetic: a cavity pressure-decay test on an installed unit is what settles it.',
   },
   dp_pa: {
@@ -110,6 +110,21 @@ export const TIPS = {
     what: 'Use the series pressure model (default). Off = legacy parallel model: both layers at the same fixed operating pressure, both feeding the cavity every hour.',
     how: 'The legacy model overstates airflow by 3× (equal layers) to 60× (retrofit 60× tighter than the existing window) and credits the leaky side with the moisture. Kept only for comparison.',
     src: 'AUDIT §7.',
+  },
+  loops: {
+    what: 'Single-sided loop through each layer\'s own cracks. A small chimney: the cavity air is warmer or colder than the side beyond the layer, so air leaves through the layer\'s high crack and comes in through its low crack, nothing passing the other layer.',
+    how: 'ΔP_loop = |ρ_side − ρ_cavity|·g·k·H_window; flow of half the layer\'s leakage at ΔP_loop/2. Added to the through-flow. This is why a hermetic retrofit over an unsealed old window still breathes outdoor air at a few ACH, and why both seals matter.',
+    src: 'Ideal-gas buoyancy; the crack placement (k) and the sub-1 Pa exponent are the assumptions. Gust pumping and the wind gradient over the face are not modelled (second order).',
+  },
+  loop_k: {
+    what: 'Where the cracks are: the fraction of the window height between the average inlet and the average outlet of the loop.',
+    how: 'k = 1: all leakage at head and sill, the strongest chimney (an operable sash; a perimeter wet seal that fails at the corners). k = 0.5: leakage spread evenly over the height, half the pull. k = 0: all cracks at one height, no chimney whatever the rating.',
+    src: 'Default 0.75, ESTIMATE between spread-out and all-at-the-ends. Loop flow scales as k^0.65, so 0.5 vs 1.0 is a 1.6× difference.',
+  },
+  loop_n: {
+    what: 'Flow exponent used for the loop, which runs well below 1 Pa.',
+    how: 'q ∝ ΔP^n. At 75 Pa cracks are turbulent-ish (0.65); at 0.3 Pa they are probably laminar (1.0), which would give up to 6× less loop flow from the same rating.',
+    src: 'Default 0.65, the conservative choice for desiccant life. Set 1.0 to see the laminar case.',
   },
   breathing: {
     what: 'Thermal breathing: the cavity air contracts as it cools and draws in air from both sides in proportion to their leakage.',

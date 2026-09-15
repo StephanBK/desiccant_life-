@@ -95,9 +95,12 @@ export default function Rail({ inp, set, presets, busy, onRun, onClose }) {
           <Num label="Storeys" k="floors" inp={inp} set={set} min={1} max={200} />
           <Num label="Window on floor" k="window_floor" inp={inp} set={set} min={1} max={200} />
           <Num label="Floor height" k="floor_height_ft" unit="ft" inp={inp} set={set} step={0.1} min={6} max={30} />
+          <Check label="Single-sided loops (chimney through each layer)" k="loops" inp={inp} set={set} />
+          <Num label="Crack placement k" k="loop_k" inp={inp} set={set} step={0.05} min={0} max={1} />
+          <Num label="Loop flow exponent" k="loop_n" inp={inp} set={set} step={0.05} min={0.5} max={1} />
           <Check label="Thermal breathing" k="breathing" inp={inp} set={set} />
           <Check label="Series model (off = legacy parallel)" k="series_model" inp={inp} set={set} />
-          <p className="hint">Positive pushes room air into the cavity, negative pulls outdoor air in. Wind is added by direction against the facade orientation above; stack from the floor position.</p>
+          <p className="hint">Positive pushes room air into the cavity, negative pulls outdoor air in. Wind is added by direction against the facade orientation above; stack from the floor position. Each layer also breathes with its own side through its own cracks (the loop), so both seals matter.</p>
           <Num label="Reference pressure for the ACH readouts" k="dp_pa" unit="Pa" inp={inp} set={set} step={0.5} min={0} max={75} />
         </div>
 
