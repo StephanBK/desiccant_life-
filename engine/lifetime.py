@@ -67,6 +67,10 @@ from engine.cavity import (
 )
 from engine.desiccant import DESICCANTS, DEFAULT_DESICCANT, DesiccantType, uptake_step
 from engine.geometry import CavityGeometry
+from engine.pressure import (
+    DEFAULT_FLOOR_HEIGHT_M, DEFAULT_FLOORS, DEFAULT_WINDOW_FLOOR, HvacSchedule,
+    breathing_ach, breathing_split, height_above_npl_m, hour_flow,
+)
 from engine.leakage import (
     DEFAULT_BEAD_DEPTH_M, DEFAULT_BEAD_WIDTH_M, DEFAULT_OPERATING_PA, DEFAULT_SEALANT, SEALANTS,
     ach_from_air_leakage, sealant_diffusion_kg_per_h, wind_pressure_pa,
@@ -167,6 +171,17 @@ class LifetimeInputs:
     al_out: float | None = None
     al_in: float | None = None
     dp_pa: float = DEFAULT_OPERATING_PA
+    # Signed pressure model (engine.pressure), used whenever BOTH rated
+    # leakages are given. dp_pa above is then only the reference pressure
+    # for the derived ach_out / ach_in shown in the UI, not what the solver
+    # runs at. Set series_model=False to force the legacy parallel model.
+    series_model: bool = True
+    hvac: HvacSchedule = field(default_factory=HvacSchedule)
+    building_floors: int = DEFAULT_FLOORS
+    window_floor: int = DEFAULT_WINDOW_FLOOR
+    floor_height_m: float = DEFAULT_FLOOR_HEIGHT_M
+    facade_azimuth_deg: float | None = None
+    breathing: bool = True
     # Sealant vapour diffusion, the floor once air leakage is at the test
     # detection limit. Key into engine.leakage.SEALANTS; bead in metres.
     sealant_out: str = DEFAULT_SEALANT
@@ -207,6 +222,8 @@ class LifetimeInputs:
             self.ach_in = ach_from_air_leakage(self.al_in, self.dp_pa, self.geometry.offset_m)
         if self.ach_out < 0 or self.ach_in < 0:
             raise ValueError("ACH values cannot be negative")
+        # Validates floors; the value itself is recomputed where used.
+        height_above_npl_m(self.window_floor, self.building_floors, self.floor_height_m)
         if self.desiccant_grams < 0:
             raise ValueError("desiccant_grams cannot be negative")
         if self.desiccant_key not in DESICCANTS:
@@ -217,6 +234,14 @@ class LifetimeInputs:
             raise ValueError("max_years must be 1..50")
         if self.substeps < 1:
             raise ValueError("substeps must be at least 1")
+
+    @property
+    def uses_series_model(self) -> bool:
+        return self.series_model and self.al_out is not None and self.al_in is not None
+
+    @property
+    def height_above_npl_m(self) -> float:
+        return height_above_npl_m(self.window_floor, self.building_floors, self.floor_height_m)
 
     @property
     def desiccant(self) -> DesiccantType:
@@ -245,6 +270,8 @@ class HourTables:
     vent_rise_k: list[float]
     w_room: float
     diff_kg_per_m2_h: list[float]
+    #: Signed P_room - P_outdoor per hour (series model); empty for legacy.
+    dp_pa: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -360,7 +387,11 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
     gap = inp.geometry.offset_m
     w_room = w_from_t_rh(inp.t_room_c, inp.rh_room, p_atm_pa=p_atm)
     has_wind = bool(weather.wind_m_s)
+    has_wdir = bool(getattr(weather, "wind_dir_deg", None))
     has_cloud = bool(weather.cloud_type)
+    series = inp.uses_series_model
+    h_npl = inp.height_above_npl_m if series else 0.0
+    dp_l: list[float] = []
 
     t_cold_l, t_air_l, w_sat_l, m_cav_l, w_out_l = [], [], [], [], []
     a_out_l, a_tot_l, w_sup_l, rise_l, diff_l = [], [], [], [], []
@@ -384,13 +415,25 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
                 op = cloud_opacity(weather.cloud_type[i]) if has_cloud else 0.0
                 t_cold += radiative_surface_drop(t_cold, t_o, h_out, opacity=op)
 
-        if inp.wind_scaling and inp.al_out is not None:
+        if series:
+            hf = hour_flow(
+                al_out=inp.al_out, al_in=inp.al_in, offset_m=gap, hour_of_year=i,
+                t_in_c=inp.t_room_c, t_out_c=t_o, wind_m_s=wind if has_wind else 0.0,
+                wind_from_deg=weather.wind_dir_deg[i] if has_wdir else None,
+                facade_azimuth_deg=inp.facade_azimuth_deg, height_above_npl=h_npl,
+                hvac=inp.hvac, p_atm_pa=p_atm,
+            )
+            a_out, a_in = hf.ach_out, hf.ach_in
+            dp_l.append(hf.dp_pa)
+        elif inp.wind_scaling and inp.al_out is not None:
             a_out = ach_from_air_leakage(inp.al_out, inp.dp_pa + wind_pressure_pa(wind), gap)
+            a_in = inp.ach_in
         elif inp.wind_scaling:
             a_out = wind_scaled_ach(inp.ach_out, wind)
+            a_in = inp.ach_in
         else:
             a_out = inp.ach_out
-        a_in = inp.ach_in
+            a_in = inp.ach_in
         a_tot = a_out + a_in
 
         rise = 0.0
@@ -423,11 +466,27 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
         j_out = sealant_diffusion_kg_per_h(perim, inp.bead_width_m, inp.bead_depth_m, SEALANTS[inp.sealant_out], p_w_from_w(w_out, p_atm)) / area if w_out > 0 else 0.0
         diff_l.append(j_in + j_out)
 
+    if series and inp.breathing:
+        # Breathing needs the cavity air temperature series, so it is added
+        # after the loop. It only changes the two ACH lists and the supply
+        # humidity; the stream temperature and vent rise above already
+        # include the through-flow, which dominates by orders of magnitude.
+        f_out, f_in = breathing_split(inp.al_out, inp.al_in)
+        for i in range(n):
+            b = breathing_ach(t_air_l[i - 1], t_air_l[i])
+            if b <= 0.0:
+                continue
+            a_out = a_out_l[i] + b * f_out
+            a_tot = a_tot_l[i] + b
+            a_in = a_tot - a_out
+            a_out_l[i] = a_out; a_tot_l[i] = a_tot
+            w_sup_l[i] = (a_out * w_out_l[i] + a_in * w_room) / a_tot if a_tot > 0 else w_room
+
     return HourTables(
         n=n, t_out_c=list(weather.t_out_c), w_out=w_out_l, t_cold_c=t_cold_l,
         t_air_c=t_air_l, w_sat_cold=w_sat_l, m_cav=m_cav_l, ach_out=a_out_l,
         ach_total=a_tot_l, w_supply=w_sup_l, vent_rise_k=rise_l, w_room=w_room,
-        diff_kg_per_m2_h=diff_l,
+        diff_kg_per_m2_h=diff_l, dp_pa=dp_l,
     )
 
 
