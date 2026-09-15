@@ -76,6 +76,36 @@ the two independent flows at full dP for n = 0.65. When one layer is 60x
 tighter (wet-sealed retrofit over an operable window) q is within 3 % of
 the tight layer alone at the full dP.
 
+SINGLE-SIDED LOOPS (added the same day, after review)
+--------------------------------------------------------
+Series through-flow is not the only exchange. Each layer also trades air
+with the side it faces THROUGH ITS OWN CRACKS, with nothing passing the
+other layer: a small chimney. The cavity air is warmer or colder than the
+side beyond the layer, the layer has cracks low and high (sill and head
+on an operable sash), so air of one density leaves at one end and air of
+the other density comes in at the other end. Driving pressure
+
+    dP_loop = |rho_side - rho_cavity| . g . k . H_window
+
+k is the fraction of the window height separating the average inlet from
+the average outlet: 1 with all leakage at head and sill, 0.5 spread
+evenly, 0 all at one height. Default 0.75, ESTIMATE. Half the layer's
+leakage is the inlet, half the outlet, each at dP_loop / 2:
+
+    q_loop = (C / 2) . (dP_loop / 2)^n_loop        n_loop default 0.65
+
+At well under 1 Pa crack flow is probably laminar (n near 1), which
+would give up to 6x less; 0.65 is kept as the conservative choice for
+desiccant life and is a parameter. Gust pumping and the wind-pressure
+gradient over the face drive the same kind of loop and are not modelled;
+they are second order next to the buoyant loop.
+
+Consequence: with a hermetic retrofit the cavity still breathes outdoor
+air through the old window at its own rate, so BOTH seals matter: the
+tighter layer sets the through-flow, each layer's own leakage sets its
+loop. This is why interior storm windows fog over leaky prime windows,
+and why INOVUES wet-seals both sides.
+
 BREATHING
 ---------
 The only exchange that is genuinely two-sided. Cavity air expands and
@@ -112,6 +142,8 @@ DEFAULT_OCC_END_H = 19
 DEFAULT_FLOORS = 10
 DEFAULT_WINDOW_FLOOR = 5
 DEFAULT_FLOOR_HEIGHT_M = 3.6
+DEFAULT_LOOP_K = 0.75
+DEFAULT_LOOP_EXPONENT = FLOW_EXPONENT
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +287,33 @@ def pressure_split_pa(al_out_cfm_ft2: float, al_in_cfm_ft2: float, dp_abs_pa: fl
 
 
 # ---------------------------------------------------------------------------
+# Single-sided buoyant loop through one layer
+# ---------------------------------------------------------------------------
+
+def loop_dp_pa(t_side_c: float, t_cavity_c: float, window_height_m: float, k: float,
+               p_atm_pa: float = 101325.0) -> float:
+    """Chimney pressure of a loop through one layer, Pa (always >= 0)."""
+    if not 0.0 <= k <= 1.0:
+        raise ValueError("loop k must be within 0..1")
+    if window_height_m < 0:
+        raise ValueError("window height cannot be negative")
+    return abs(air_density(t_side_c, p_atm_pa) - air_density(t_cavity_c, p_atm_pa)) * G * k * window_height_m
+
+
+def loop_ach(al_cfm_ft2: float, offset_m: float, dp_loop_pa: float,
+             exponent: float = DEFAULT_LOOP_EXPONENT) -> float:
+    """Air exchanged with the side beyond one layer through that layer alone.
+    Half the layer's leakage is the inlet and half the outlet, each across
+    half the loop pressure; what enters equals what leaves."""
+    if offset_m <= 0:
+        raise ValueError("offset must be positive")
+    if dp_loop_pa <= 0.0 or al_cfm_ft2 <= 0.0:
+        return 0.0
+    c_half = flow_coefficient(al_cfm_ft2, exponent) / 2.0
+    return c_half * (dp_loop_pa / 2.0) ** exponent / offset_m
+
+
+# ---------------------------------------------------------------------------
 # Breathing
 # ---------------------------------------------------------------------------
 
@@ -285,16 +344,21 @@ class HourFlow:
     dp_hvac_pa: float
     dp_stack_pa: float
     dp_wind_pa: float
-    ach_out: float          # outdoor air into the cavity this hour
+    ach_out: float          # outdoor air into the cavity this hour (through-flow + loop + breathing share)
     ach_in: float           # room air into the cavity this hour
+    loop_out: float = 0.0   # of which, the single-sided loop through the existing window
+    loop_in: float = 0.0    # of which, the single-sided loop through the retrofit
 
 
 def hour_flow(*, al_out: float, al_in: float, offset_m: float, hour_of_year: int,
               t_in_c: float, t_out_c: float, wind_m_s: float, wind_from_deg: float | None,
               facade_azimuth_deg: float | None, height_above_npl: float,
               hvac: HvacSchedule, p_atm_pa: float = 101325.0,
-              exponent: float = FLOW_EXPONENT, breathing: float = 0.0) -> HourFlow:
-    """Signed dP and the resulting one-sided through-flow, plus breathing."""
+              exponent: float = FLOW_EXPONENT, breathing: float = 0.0,
+              t_cavity_c: float | None = None, window_height_m: float = 0.0,
+              loop_k: float = DEFAULT_LOOP_K, loop_exponent: float = DEFAULT_LOOP_EXPONENT) -> HourFlow:
+    """Signed dP and the resulting one-sided through-flow, plus the two
+    single-sided loops (when ``t_cavity_c`` is given) and breathing."""
     if offset_m <= 0:
         raise ValueError("offset must be positive")
     dp_h = hvac.dp_pa(hour_of_year)
@@ -304,8 +368,14 @@ def hour_flow(*, al_out: float, al_in: float, offset_m: float, hour_of_year: int
     q = series_flow_m3h_m2(al_out, al_in, abs(dp), exponent)
     ach = q / offset_m
     a_out, a_in = (0.0, ach) if dp > 0.0 else (ach, 0.0)
+    l_out = l_in = 0.0
+    if t_cavity_c is not None and window_height_m > 0.0:
+        l_out = loop_ach(al_out, offset_m, loop_dp_pa(t_out_c, t_cavity_c, window_height_m, loop_k, p_atm_pa), loop_exponent)
+        l_in = loop_ach(al_in, offset_m, loop_dp_pa(t_in_c, t_cavity_c, window_height_m, loop_k, p_atm_pa), loop_exponent)
+        a_out += l_out
+        a_in += l_in
     if breathing > 0.0:
         f_out, f_in = breathing_split(al_out, al_in)
         a_out += breathing * f_out
         a_in += breathing * f_in
-    return HourFlow(dp, dp_h, dp_s, dp_w, a_out, a_in)
+    return HourFlow(dp, dp_h, dp_s, dp_w, a_out, a_in, l_out, l_in)

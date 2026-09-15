@@ -6,7 +6,7 @@ import pytest
 
 from engine.leakage import ach_from_air_leakage, FLOW_EXPONENT
 from engine.pressure import (
-    HvacSchedule, breathing_ach, breathing_split, cp_from_angle, flow_coefficient,
+    HvacSchedule, loop_ach, loop_dp_pa, breathing_ach, breathing_split, cp_from_angle, flow_coefficient,
     height_above_npl_m, hour_flow, pressure_split_pa, series_flow_m3h_m2, stack_dp_pa,
     wind_angle_off_normal_deg, wind_dp_pa,
 )
@@ -171,3 +171,46 @@ def test_hour_flow_breathing_is_two_sided():
                   height_above_npl=0.0, hvac=HvacSchedule(), breathing=0.004)
     assert f.dp_pa == 0.0
     assert f.ach_out == pytest.approx(0.003) and f.ach_in == pytest.approx(0.001)
+
+
+# --- single-sided loop -----------------------------------------------------
+
+def test_loop_pressure_hand_calc():
+    # 8 K between cavity (8 C) and outdoors (0 C), 2.44 m window, k = 0.75
+    dp = loop_dp_pa(0.0, 8.0, 2.44, 0.75)
+    rho_out = 101325 / (287.05 * 273.15)
+    rho_cav = 101325 / (287.05 * 281.15)
+    assert dp == pytest.approx((rho_out - rho_cav) * 9.80665 * 0.75 * 2.44, rel=1e-9)
+    assert 0.6 < dp < 0.8
+    assert loop_dp_pa(8.0, 0.0, 2.44, 0.75) == dp                 # sign-free
+    assert loop_dp_pa(8.0, 8.0, 2.44, 0.75) == 0.0                # no temperature difference, no chimney
+    assert loop_dp_pa(0.0, 8.0, 2.44, 0.0) == 0.0                 # all cracks at one height, no chimney
+    assert loop_dp_pa(0.0, 8.0, 2.44, 1.0) == pytest.approx(dp / 0.75)
+
+
+def test_loop_flow_hand_calc():
+    dp = 0.7
+    ach = loop_ach(0.30, 0.01524, dp)
+    c_half = flow_coefficient(0.30) / 2
+    assert ach == pytest.approx(c_half * (dp / 2) ** N / 0.01524, rel=1e-9)
+    assert 3.0 < ach < 8.0                                        # operable sash: a few ACH
+    assert 0.03 < loop_ach(0.005, 0.01524, dp) < 0.15             # wet-sealed: a few hundredths
+    assert loop_ach(0.30, 0.01524, dp, exponent=1.0) < ach / 4   # laminar assumption: several times less
+    assert loop_ach(0.0, 0.01524, dp) == 0.0
+    assert loop_ach(0.30, 0.01524, 0.0) == 0.0
+
+
+def test_hour_flow_loops_are_two_sided_and_per_layer():
+    common = dict(al_out=0.30, al_in=0.005, offset_m=0.01524, hour_of_year=3, t_in_c=21.0, t_out_c=0.0,
+                  wind_m_s=0.0, wind_from_deg=None, facade_azimuth_deg=180.0, height_above_npl=0.0,
+                  hvac=HvacSchedule(), window_height_m=2.44)
+    f = hour_flow(t_cavity_c=8.0, **common)          # dP = 0: no through-flow, loops only
+    assert f.dp_pa == 0.0
+    assert f.loop_out == pytest.approx(loop_ach(0.30, 0.01524, loop_dp_pa(0.0, 8.0, 2.44, 0.75)))
+    assert f.loop_in == pytest.approx(loop_ach(0.005, 0.01524, loop_dp_pa(21.0, 8.0, 2.44, 0.75)))
+    assert f.ach_out == f.loop_out and f.ach_in == f.loop_in
+    assert 30 < f.loop_out / f.loop_in < 60            # 60x leakage is 60^0.65 = 14x flow, x 13 K vs 8 K drive
+    g = hour_flow(t_cavity_c=None, **common)            # loops off
+    assert g.ach_out == 0.0 and g.ach_in == 0.0
+    h = hour_flow(t_cavity_c=8.0, **{**common, "loop_k": 0.0})
+    assert h.ach_out == 0.0 and h.ach_in == 0.0
