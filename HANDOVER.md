@@ -1,8 +1,37 @@
 # HANDOVER — Desiccant Lifetime Simulator (ANLY-003)
 
-Last session: 2026-09-14 (session 3). State: v0.4 built and verified on a
-fresh clone; main on GitHub (StephanBK/desiccant_life-) is at c922411 and
-Railway serves it; v0.4 (be7eb37+) not yet pushed.
+Last session: 2026-09-15 (session 4). State: v0.5 (series pressure
+model) committed locally on top of cefd881; main on GitHub is at
+cefd881 and Railway serves that. v0.5 not yet pushed: Stephan pushes
+with his PAT from the patch bundle.
+
+## Session 4 (2026-09-15): the two layers were in parallel; now in series
+
+- Concern raised: "ACH is everything; is it from 75 Pa?" The 75 Pa was
+  already scaled to 3 Pa, but the two layers were summed as
+  independent leaks at the same pressure (parallel). Real assembly is
+  series: one signed room-to-outdoor dP per hour, tighter layer sets
+  the flow, cavity fed from the high-pressure side. AUDIT.md §6.
+- New engine/pressure.py: HVAC schedule (+5 Pa weekdays 07 to 19, 0
+  otherwise), stack from floor position (NPL at mid-height), wind by
+  direction vs facade (Cp table), series closed form, breathing.
+  Weather now fetches NSRDB wind_direction; cached years without it
+  are refetched (engine/weather.py _cache_read).
+- Legacy parallel model kept behind series_model=false and for bare
+  ACH inputs; cross-check and 0 g equivalence tests run on that path
+  and still pass. New tests/test_series_equivalence.py ties series to
+  legacy exactly at constant dP.
+- FINDING: series cut modelled flow 4x to 90x but lifetime is still
+  weeks at the E283 floor (0.005 cfm/ft2) and ~6 yr at true hermetic,
+  capped by silicone bead diffusion (~30 g/yr). Retrofit seal leakage
+  below the E283 floor is THE unknown; cavity pressure-decay test on an
+  installed unit is the measurement. New "Hermetic, IGU-grade" (0.0)
+  preset brackets it with "Wet-sealed" (0.005).
+- Property test slack for "more leakage never lengthens life" widened
+  to one desiccant time constant (1 g sieve filling in 11 h).
+- Open: gust pumping not modelled (only matters below ~0.01 ACH); Cp
+  height/terrain correction; a customer-facing readout of "which
+  measurement would settle this".
 
 ## Where things stand
 

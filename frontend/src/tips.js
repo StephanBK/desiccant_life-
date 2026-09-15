@@ -48,23 +48,73 @@ export const TIPS = {
   // ---------------------------------------------------------------- leakage
   al_out: {
     what: 'Rated air leakage of the EXISTING window, cfm/ft² of window area at a 75 Pa test pressure (ASTM E283 / NFRC 400, the AERC certificate number).',
-    how: 'Converted to cavity ACH each hour: ACH = AL × 18.29 × (ΔP/75)^0.65 / offset, with ΔP = operating pressure plus wind stagnation pressure when wind scaling is on. Outdoor air enters at outdoor humidity ratio W_out.',
-    src: 'Published anchors: AERC baseline single-pane 2.0; new fixed commercial spec 0.06 (ticked). Values between are estimates. Uncertainty on the derived ACH ≈ factor 3 (AUDIT §3.1).',
+    how: 'Converted to a flow coefficient C = AL × 18.29 / 75^0.65 (m³/h per m² per Pa^0.65). The two layers are in SERIES: one signed pressure difference room-to-outdoor per hour, the same air passes both, the tighter layer takes most of the pressure and sets the flow. Outdoor air enters only in hours when outdoor pressure is the higher one (wind, or stack below the neutral plane in winter).',
+    src: 'Published anchors: AERC baseline single-pane 2.0; new fixed commercial spec 0.06 (ticked). Values between are estimates. Once the retrofit is tighter than this layer, this number mostly decides WHICH air fills the cavity, not how much (AUDIT §7).',
   },
   wind_scaling: {
-    what: 'Add wind stagnation pressure to the outdoor path\'s operating pressure hour by hour.',
-    how: 'ΔP_out(h) = dp_pa + 0.5·ρ·v(h)²·Cp with Cp = 0.6 (windward face). Flow scales as ΔP^0.65. Room path unchanged.',
-    src: 'NSRDB 2 m wind. Effect on fill time −20 to −50 % when on (AUDIT §1 row 4). Default on.',
+    what: 'Legacy toggle. Only used when leakage is given as bare ACH (the parallel model); with rated leakage the wind enters the signed pressure model as 0.5·ρ·v²·Cp by direction.',
+    how: 'Legacy path: ΔP_out(h) = dp_pa + 0.5·ρ·v(h)²·0.6.',
+    src: 'Kept for older API calls.',
   },
   al_in: {
     what: 'Rated air leakage of the RETROFIT (the secondary window), cfm/ft² at 75 Pa.',
-    how: 'Same conversion as the existing window. Room air enters at the room humidity ratio W_room = f(T_room, RH_room). Supply humidity to the cavity is the flow-weighted mix of both streams.',
-    src: 'AERC best certified insert 0.06 (Alpen WinSert, Dec 2021, ticked). Wet-sealed 0.005 is the ASTM E283 detection floor, the INOVUES practice (continuous silicone bead), an estimate until a cavity pressurisation test replaces it. Below the floor, sealant diffusion takes over.',
+    how: 'Same coefficient. In series with the existing window; room air enters only in hours when room pressure is the higher one (HVAC pressurisation, stack above the neutral plane in winter, leeward suction outside). For INOVUES this is the tighter layer, so it sets the through-flow and therefore the lifetime.',
+    src: 'AERC best certified insert 0.06 (Alpen WinSert, Dec 2021, ticked). Wet-sealed 0.005 is the ASTM E283 detection floor, not a measurement; Hermetic 0.0 is the IGU-grade other end of the same unknown. Weeks at the floor, years at hermetic: a cavity pressure-decay test on an installed unit is what settles it.',
   },
   dp_pa: {
-    what: 'Operating pressure difference across each layer, Pa.',
-    how: 'Scales the rated leakage from the 75 Pa test to service conditions via (ΔP/75)^0.65. Applied to both layers (in series the tighter one takes most of the total).',
-    src: 'Default 3 Pa: stack over 8 ft at 25 K ≈ 2.5 Pa, wind at 4 m/s ≈ 5.8 Pa (added separately). Fill time ±25 % for 1.5 to 6 Pa; the largest single uncertainty (AUDIT §1 row 1).',
+    what: 'Reference pressure for the derived ACH shown under each ladder only. The solver no longer runs at a fixed pressure.',
+    how: 'ACH shown = AL × 18.29 × (ΔP/75)^0.65 / offset at this ΔP, for that layer alone. The run uses the signed hourly pressure from HVAC, stack and wind (Building group).',
+    src: 'Legacy input, default 3 Pa.',
+  },
+  p_occ_pa: {
+    what: 'HVAC pressurisation of the room relative to outdoors during occupied hours, Pa. Positive pushes room air through the retrofit into the cavity.',
+    how: 'Added to stack and wind each occupied hour to form the signed ΔP. Flow through the two layers in series scales as |ΔP|^0.65; the fed side follows the sign.',
+    src: 'Default +5 Pa: the low end of the 5 to 25 Pa design range (ideal setpoint 12.5 Pa), matching field measurements in existing buildings, which run at 1 to 2 Pa and cannot hold a high setpoint through a leaky old facade. ESTIMATE; a BAS trend of building static settles it for a given building.',
+  },
+  p_unocc_pa: {
+    what: 'HVAC pressurisation during unoccupied hours, Pa.',
+    how: 'As above for hours outside the occupied window.',
+    src: 'Default 0 Pa: night setback closes the outdoor damper, so only stack and wind act. Set negative if exhaust runs with intake closed.',
+  },
+  occ_start_h: {
+    what: 'First occupied hour of the day (0 to 24).',
+    how: 'Occupied when start ≤ hour < end. Wrap past midnight is allowed (start > end).',
+    src: 'Default 07:00.',
+  },
+  occ_end_h: {
+    what: 'First unoccupied hour of the day (0 to 24, exclusive).',
+    how: 'See occupied start.',
+    src: 'Default 19:00.',
+  },
+  weekdays_only: {
+    what: 'Apply the occupied pressure on weekdays only.',
+    how: 'A TMY has no real calendar (each month is spliced from a different year), so a synthetic calendar starting on a Monday is used. The share of occupied hours (36 % with the defaults) is what matters, not the dates.',
+    src: 'Default on.',
+  },
+  floors: {
+    what: 'Number of storeys in the building.',
+    how: 'The neutral pressure plane is taken at mid-height (uniform leakage). Height above it = (window floor − 0.5 − floors/2) × floor height. Stack ΔP = (ρ_out − ρ_in)·g·h: positive (room pushes out) above the plane in winter, negative below, reversed in summer.',
+    src: 'Default 10. A ground-floor window in a 20-storey building at 0 °C outside sees about −8 Pa; the 5th of 10 about zero. Real neutral planes shift with shaft and lobby leakage; this is an estimate.',
+  },
+  window_floor: {
+    what: 'Floor the window is on (1 = ground).',
+    how: 'See floors. The window sits at the middle of its floor.',
+    src: 'Default 5.',
+  },
+  floor_height_ft: {
+    what: 'Floor-to-floor height, ft.',
+    how: 'See floors.',
+    src: 'Default 11.8 ft (3.6 m), typical commercial.',
+  },
+  series_model: {
+    what: 'Use the series pressure model (default). Off = legacy parallel model: both layers at the same fixed operating pressure, both feeding the cavity every hour.',
+    how: 'The legacy model overstates airflow by 3× (equal layers) to 60× (retrofit 60× tighter than the existing window) and credits the leaky side with the moisture. Kept only for comparison.',
+    src: 'AUDIT §7.',
+  },
+  breathing: {
+    what: 'Thermal breathing: the cavity air contracts as it cools and draws in air from both sides in proportion to their leakage.',
+    how: 'ACH_breath(h) = max(0, T_air(h−1) − T_air(h)) / T_air(h). About 0.003 ACH for a 1 K hourly drop; the only two-sided exchange in the model and the floor when both layers are hermetic.',
+    src: 'Ideal gas; no assumption beyond that. Gust pumping (ΔP/P_atm ≈ 1e-4 per gust) is not modelled and only matters below ~0.01 ACH.',
   },
   sealant_out: {
     what: 'Sealant used to wet-seal the existing window on its cavity side.',
@@ -211,7 +261,7 @@ export const TIPS = {
     src: 'engine/leakage.py.',
   },
   ach_derived: {
-    what: 'Cavity air changes per hour derived from the rated leakage, operating pressure and offset (calm-wind value).',
+    what: 'Air changes this layer ALONE would give at the reference pressure. Not what the run uses: the run solves both layers in series at the signed hourly pressure, so the through-flow is at most the tighter layer\'s value here.',
     how: 'ACH = AL × 18.29 × (ΔP/75)^0.65 / offset. Compare: Eurac CFD open vent 23 to 78 ACH (60 mm cavity, summer).',
     src: 'engine/leakage.py ach_from_air_leakage.',
   },

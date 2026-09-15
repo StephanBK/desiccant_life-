@@ -230,9 +230,12 @@ def series_flow_m3h_m2(al_out_cfm_ft2: float, al_in_cfm_ft2: float, dp_abs_pa: f
     c_in = flow_coefficient(al_in_cfm_ft2, exponent)
     if c_out <= 0.0 or c_in <= 0.0 or dp_abs_pa == 0.0:
         return 0.0
-    inv = 1.0 / exponent
-    denom = (c_out ** -inv + c_in ** -inv) ** exponent
-    return dp_abs_pa ** exponent / denom
+    # Ratio form of |dP|^n / (C_out^(-1/n) + C_in^(-1/n))^n: the tight
+    # layer's flow at full |dP|, reduced by the share of pressure the loose
+    # layer takes. (tight/loose)^(1/n) <= 1, so nothing can overflow.
+    c_tight, c_loose = min(c_out, c_in), max(c_out, c_in)
+    share = (c_tight / c_loose) ** (1.0 / exponent)
+    return c_tight * dp_abs_pa ** exponent / (1.0 + share) ** exponent
 
 
 def pressure_split_pa(al_out_cfm_ft2: float, al_in_cfm_ft2: float, dp_abs_pa: float,

@@ -17,7 +17,9 @@ from dataclasses import replace
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from engine.geometry import CavityGeometry
-from engine.lifetime import LifetimeInputs, run_lifetime
+from engine.leakage import ach_from_air_leakage
+from engine.lifetime import LifetimeInputs, build_tables, run_lifetime
+from engine.pressure import HvacSchedule
 from engine.weather import WeatherYear
 
 SETTINGS = dict(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])
@@ -36,7 +38,9 @@ def weather_years(draw):
     wind = draw(st.floats(0, 8))
     t = [t0 + amp * math.sin(2 * math.pi * i / 24) for i in range(n)]
     rh = [min(0.99, max(0.05, rh0 + 0.2 * math.sin(2 * math.pi * i / 24 + 1.0))) for i in range(n)]
-    return WeatherYear(t_out_c=t, rh_out=rh, wind_m_s=[wind] * n)
+    wdir = draw(st.one_of(st.none(), st.floats(0, 360)))
+    return WeatherYear(t_out_c=t, rh_out=rh, wind_m_s=[wind] * n,
+                       wind_dir_deg=[] if wdir is None else [wdir] * n)
 
 
 @st.composite
@@ -62,7 +66,16 @@ def inputs(draw, **fixed):
         pane_coupling=draw(st.booleans()),
         absorptance=0.0, sky_radiation=draw(st.booleans()),
         max_years=draw(st.integers(1, 3)),
+        series_model=draw(st.booleans()),
+        breathing=draw(st.booleans()),
+        hvac=HvacSchedule(occupied_pa=draw(st.floats(-15, 25)), unoccupied_pa=draw(st.floats(-5, 5)),
+                          weekdays_only=draw(st.booleans())),
+        facade_azimuth_deg=draw(st.one_of(st.none(), st.floats(0, 360))),
+        floor_height_m=draw(st.floats(2.5, 5.0)),
     )
+    floors = draw(st.integers(1, 40))
+    kw["building_floors"] = floors
+    kw["window_floor"] = draw(st.integers(1, floors))
     kw.update(fixed)
     return LifetimeInputs(**kw)
 
@@ -133,14 +146,16 @@ def test_more_leakage_never_lengthens_life(w, inp, factor):
     slower on a drier blend, which is physical, not a bug (found by this
     test at tau 46 h). Even at the same mix, more flow pulls the cavity air
     toward the stream temperature and shifts the RH a rate-limited sieve
-    sees (found at tau 14 h, +7 %). Hence 10 % slack; a supply-limited
-    sieve (short tau) is checked strictly below."""
+    sees (found at tau 14 h, +7 %). Hence 10 % slack, and never less than
+    one desiccant time constant (a 1 g sieve that fills in 11 h cannot be
+    resolved finer than its 3 h tau; found by the series model). A
+    supply-limited sieve (short tau) is checked strictly below."""
     a = run_lifetime(inp, w, keep_year1=False, keep_daily=False)
     b_inp = replace(inp, al_out=inp.al_out * factor, al_in=inp.al_in * factor)
     b = run_lifetime(b_inp, w, keep_year1=False, keep_daily=False)
     ha = a.exhausted_hour if a.exhausted_hour is not None else 10 ** 9
     hb = b.exhausted_hour if b.exhausted_hour is not None else 10 ** 9
-    assert hb <= ha + max(1, 0.1 * ha)
+    assert hb <= ha + max(1, 0.1 * ha, inp.tau_hours)
 
 
 @settings(**SETTINGS)
@@ -225,3 +240,53 @@ def test_sealed_cavity_only_has_its_own_water(w, inp):
     bead_g = sum(y.net_diffusion_g for y in r.years)
     assert r.total_water_into_desiccant_g <= (initial_g + bead_g) * 1.05 + 1e-6
     assert bead_g >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# Series pressure model invariants
+# ---------------------------------------------------------------------------
+
+@settings(**SETTINGS)
+@given(weather_years(), inputs(series_model=True, breathing=False))
+def test_series_feeds_one_side_per_hour(w, inp):
+    tb = build_tables(inp, w, None)
+    for a_out, a_tot in zip(tb.ach_out, tb.ach_total):
+        a_in = a_tot - a_out
+        assert min(a_out, a_in) <= 1e-12
+
+
+@settings(**SETTINGS)
+@given(weather_years(), inputs(series_model=True, breathing=False))
+def test_series_flow_never_exceeds_tighter_layer_alone(w, inp):
+    """The tighter layer at the FULL |dP| is an upper bound on through-flow."""
+    tb = build_tables(inp, w, None)
+    tight = min(inp.al_out, inp.al_in)
+    for a_tot, dp in zip(tb.ach_total, tb.dp_pa):
+        bound = ach_from_air_leakage(tight, abs(dp), inp.geometry.offset_m)
+        assert a_tot <= bound * (1 + 1e-9) + 1e-12
+
+
+@settings(**SETTINGS)
+@given(weather_years(), inputs(series_model=True, breathing=False), st.floats(0.05, 0.95))
+def test_tightening_a_layer_never_raises_flow(w, inp, factor):
+    a = build_tables(inp, w, None).ach_total
+    b = build_tables(replace(inp, al_in=inp.al_in * factor), w, None).ach_total
+    assert all(y <= x * (1 + 1e-9) + 1e-12 for x, y in zip(a, b))
+
+
+@settings(**SETTINGS)
+@given(weather_years(), inputs(series_model=True, al_in=0.0))
+def test_hermetic_layer_leaves_breathing_only(w, inp):
+    tb = build_tables(inp, w, None)
+    assert max(tb.ach_total) < 0.2                    # a 50 K hourly swing would be 0.17
+    if not inp.breathing:
+        assert max(tb.ach_total) == 0.0
+
+
+@settings(**SETTINGS)
+@given(weather_years(), inputs(series_model=True, breathing=False))
+def test_fed_side_follows_pressure_sign(w, inp):
+    tb = build_tables(inp, w, None)
+    for a_out, a_tot, dp in zip(tb.ach_out, tb.ach_total, tb.dp_pa):
+        if a_tot > 0:
+            assert (a_out > 0) == (dp < 0)

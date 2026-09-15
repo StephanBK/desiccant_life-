@@ -82,8 +82,23 @@ export default function Rail({ inp, set, presets, busy, onRun, onClose }) {
         <div className="group">
           <h3>Retrofit<span>leakage from the room</span></h3>
           {presets && <Ladder k="al_in" inp={inp} set={set} presets={presets.al_in} note="Type the value from an AERC certificate or test report." />}
-          <Num label="Operating pressure" k="dp_pa" unit="Pa" inp={inp} set={set} step={0.5} min={0} max={75} />
-          <p className="hint">Ratings are measured at 75 Pa. A cavity sees about 2 to 6 Pa of stack and wind; flow scales with pressure^0.65. <a href={presets?.leakage_reference?.aerc_url} target="_blank" rel="noreferrer">AERC certified product search</a></p>
+          <p className="hint">Ratings are measured at 75 Pa; a cavity sees a few Pa. The two layers are in series: the tighter one sets the flow, the sign of the pressure sets which air comes in. <a href={presets?.leakage_reference?.aerc_url} target="_blank" rel="noreferrer">AERC certified product search</a></p>
+        </div>
+
+        <div className="group">
+          <h3>Building<span>signed pressure, room minus outdoors</span></h3>
+          <Num label="HVAC pressure, occupied" k="p_occ_pa" unit="Pa" inp={inp} set={set} step={0.5} min={-75} max={75} />
+          <Num label="HVAC pressure, unoccupied" k="p_unocc_pa" unit="Pa" inp={inp} set={set} step={0.5} min={-75} max={75} />
+          <Num label="Occupied from" k="occ_start_h" unit="h" inp={inp} set={set} min={0} max={24} />
+          <Num label="Occupied until" k="occ_end_h" unit="h" inp={inp} set={set} min={0} max={24} />
+          <Check label="Weekdays only" k="weekdays_only" inp={inp} set={set} />
+          <Num label="Storeys" k="floors" inp={inp} set={set} min={1} max={200} />
+          <Num label="Window on floor" k="window_floor" inp={inp} set={set} min={1} max={200} />
+          <Num label="Floor height" k="floor_height_ft" unit="ft" inp={inp} set={set} step={0.1} min={6} max={30} />
+          <Check label="Thermal breathing" k="breathing" inp={inp} set={set} />
+          <Check label="Series model (off = legacy parallel)" k="series_model" inp={inp} set={set} />
+          <p className="hint">Positive pushes room air into the cavity, negative pulls outdoor air in. Wind is added by direction against the facade orientation above; stack from the floor position.</p>
+          <Num label="Reference pressure for the ACH readouts" k="dp_pa" unit="Pa" inp={inp} set={set} step={0.5} min={0} max={75} />
         </div>
 
         <div className="group">

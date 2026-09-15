@@ -151,11 +151,10 @@ function FigLife({ h }) {
 /* ---- page ------------------------------------------------------------- */
 
 export default function Explain({ result, presets, inp }) {
-  const i = result?.inputs, h = result?.headline, y1 = result?.year1
+  const i = result?.inputs, h = result?.headline, y1 = result?.year1, pr = result?.pressure
   const des = presets?.desiccants?.find((d) => d.key === (i?.desiccant || 'ms3a'))
   const volL = i ? (i.width_in * i.height_in * i.offset_in * 16.387) / 1000 : null
   const airKg = volL ? volL * 1.2 / 1000 : null
-  const aTot = i ? i.ach_out + i.ach_in : null
   const maxRise = y1 ? Math.max(...y1.vent_rise_f) : null
 
   return (
@@ -170,11 +169,11 @@ export default function Explain({ result, presets, inp }) {
           {i && <Live rows={[['Cavity volume', `${fmt.n(volL, 1)} L`], ['Dry air mass', `${fmt.n(airKg * 1000, 1)} g`], ['Water at room humidity', `${fmt.n(airKg * 5.5, 3)} g`]]} />}
         </Step>
 
-        <Step title="2. Two air streams feed it" figure={<FigStreams aOut={i?.ach_out ?? '—'} aIn={i?.ach_in ?? '—'} />}>
-          <p>Outdoor air leaks in through the existing window; room air enters through the retrofit's vent or perimeter. Each is an air change rate. The cavity relaxes toward the flow-weighted supply humidity with an exact exponential, so no step size can overshoot.</p>
-          <div className="formula">{`dW/dt = ACH_out (W_out − W) + ACH_in (W_room − W)\nW_supply = (ACH_out·W_out + ACH_in·W_room) / (ACH_out + ACH_in)\nW(t+dt) = W_supply + (W − W_supply) · exp(−(ACH_out + ACH_in)·dt)`}</div>
-          <p>Each rate comes from a rated air leakage (cfm/ft² at 75 Pa, the AERC and ASTM E283 number) scaled to the few pascals a cavity actually sees: ACH = AL × 18.29 × (ΔP/75)^0.65 / offset. Wind adds ½ρv²·C_p to the outdoor path's pressure hour by hour. A deeper cavity dilutes the same crack flow into more air, so ACH falls in proportion to offset, but the water arriving per hour does not change, so desiccant life does not either. In winter, outdoor air is cold but dry; room air is the wetter stream. A third path is vapour diffusion through the sealant bead, J = P·A·Δp_v / L, a constant trickle that becomes the floor once air leakage reaches zero: about 0.035 g/day for a 1/4 in silicone bead, 100× less for PIB.</p>
-          {i && <Live rows={[['Existing window', `${i.al_out ?? '—'} cfm/ft² → ${fmt.g(i.ach_out)} ACH`], ['Retrofit', `${i.al_in ?? '—'} cfm/ft² → ${fmt.g(i.ach_in)} ACH`], ['Operating pressure', `${i.dp_pa} Pa`], ['Bead diffusion, room side', `${i.diffusion_g_per_day} g/day`], ['Total exchange', `${fmt.g(aTot)} ACH`], ['Air through the cavity per hour', `${fmt.n(aTot * airKg * 1000, 1)} g`], ['Water delivered per hour at 3 g/kg supply', `${fmt.n(aTot * airKg * 3, 3)} g`]]} />}
+        <Step title="2. One air stream passes through it" figure={<FigStreams aOut={i?.ach_out ?? '—'} aIn={i?.ach_in ?? '—'} />}>
+          <p>The existing window and the retrofit are two leaks in series on one path. There is a single pressure difference between the room and outdoors each hour, the cavity floats to a pressure in between, and the same air enters through one layer and leaves through the other. The tighter layer takes most of the pressure and sets how much air moves; the sign of the pressure sets which air it is. Room-side pressure comes from HVAC pressurisation and from stack above the neutral plane in winter; outdoor-side pressure from wind on the facade and stack below the neutral plane.</p>
+          <div className="formula">{`ΔP(h) = P_HVAC(h) + (ρ_out − ρ_in)·g·h_NPL − ½ρv(h)²·C_p(θ)          room minus outdoors\nq(h)  = |ΔP|^0.65 / (C_out^(−1/0.65) + C_in^(−1/0.65))^0.65     series, C = AL·18.29/75^0.65\nΔP > 0: room air in through the retrofit      ΔP < 0: outdoor air in through the existing window\nW(t+dt) = W_supply + (W − W_supply) · exp(−ACH·dt)`}</div>
+          <p>For a wet-sealed retrofit behind an operable old window the retrofit is about 60× tighter, takes 98 % of the pressure, and the through-flow is within 3 % of what the retrofit alone would pass at the full ΔP. Opening the old window's leakage further changes almost nothing; it is not the restriction. That is why the retrofit seal, and once it is airtight the sealant's vapour permeability, set the desiccant life. A deeper cavity dilutes the same flow into more air, so ACH falls with offset but the water arriving per hour does not, and desiccant life does not either. The third path is vapour diffusion through the sealant bead, J = P·A·Δp_v / L, a constant trickle that becomes the floor once air leakage reaches zero: about 0.035 g/day for a 1/4 in silicone bead, 100× less for PIB. Thermal breathing (the cavity contracting as it cools) is the only two-sided exchange, about 0.003 ACH per 1 K hourly drop.</p>
+          {i && <Live rows={[['Existing window', `${i.al_out ?? '—'} cfm/ft² (${fmt.g(i.ach_out)} ACH alone at ${i.dp_pa} Pa)`], ['Retrofit', `${i.al_in ?? '—'} cfm/ft² (${fmt.g(i.ach_in)} ACH alone at ${i.dp_pa} Pa)`], ['HVAC pressure occupied / unoccupied', `${i.p_occ_pa} / ${i.p_unocc_pa} Pa`], ['Window height above neutral plane', `${i.height_above_npl_ft} ft`], ['Mean through-flow over the year', `${fmt.g(pr?.mean_ach)} ACH`], ['Hours room-fed / outdoor-fed / still', `${pr?.hours_room_fed ?? '—'} / ${pr?.hours_outdoor_fed ?? '—'} / ${pr?.hours_neutral ?? '—'}`], ['Signed ΔP range', `${pr?.min_dp_pa ?? '—'} to ${pr?.max_dp_pa ?? '—'} Pa, mean |ΔP| ${pr?.mean_abs_dp_pa ?? '—'} Pa`], ['Wind direction in weather file', pr?.wind_direction_available ? 'yes' : 'no, every windy hour treated as windward'], ['Bead diffusion, room side', `${i.diffusion_g_per_day} g/day`], ['Air through the cavity per hour, mean', `${fmt.n((pr?.mean_ach ?? 0) * airKg * 1000, 1)} g`]]} />}
         </Step>
 
         <Step title="3. The existing pane's temperature" figure={<FigEnergy />}>

@@ -300,6 +300,7 @@ def _result_payload(r: LifetimeResult, echo: dict, location, weather, cached: bo
         "location": location.__dict__ if hasattr(location, "__dict__") else str(location),
         "weather": {**weather.describe(), "cached": cached},
         "headline": _headline(r),
+        "pressure": _pressure_summary(tb, weather),
         # Net water by source. "life": up to the hour the sieve is full (the
         # headline split); "run": the whole simulation incl. aftermath.
         # Shares are signed and sum to 100; a negative share is a path that
@@ -344,6 +345,26 @@ def _result_payload(r: LifetimeResult, echo: dict, location, weather, cached: bo
             "vent_rise_f": _round_list([x * 1.8 for x in tb.vent_rise_k], 3),
         }
     return payload
+
+
+def _pressure_summary(tb, weather) -> dict:
+    """What the signed pressure model actually did over the year."""
+    n = tb.n
+    a_tot = tb.ach_total
+    mean_ach = sum(a_tot) / n if n else 0.0
+    if not tb.dp_pa:
+        return {"series_model": False, "mean_ach": round(mean_ach, 4)}
+    room = sum(1 for d in tb.dp_pa if d > 0)
+    out = sum(1 for d in tb.dp_pa if d < 0)
+    return {
+        "series_model": True,
+        "mean_ach": round(mean_ach, 4),
+        "max_ach": round(max(a_tot), 4),
+        "hours_room_fed": room, "hours_outdoor_fed": out, "hours_neutral": n - room - out,
+        "mean_abs_dp_pa": round(sum(abs(d) for d in tb.dp_pa) / n, 3),
+        "min_dp_pa": round(min(tb.dp_pa), 2), "max_dp_pa": round(max(tb.dp_pa), 2),
+        "wind_direction_available": bool(getattr(weather, "wind_dir_deg", None)),
+    }
 
 
 ASSUMPTIONS = [

@@ -8,6 +8,8 @@ export const DEFAULT_INPUTS = {
   f_cold: 0.30, u_ip: 0.30, r_ip: 0.97, f_warm: '',
   t_in: 70, rh_in: 35,
   al_out: 'wet_sealed', al_in: 'wet_sealed', dp_pa: 3,
+  p_occ_pa: 5, p_unocc_pa: 0, occ_start_h: 7, occ_end_h: 19, weekdays_only: true,
+  floors: 10, window_floor: 5, floor_height_ft: 11.81, series_model: true, breathing: true,
   sealant_out: 'silicone', sealant_in: 'silicone', bead_width_in: 0.25, bead_depth_in: 0.25,
   wind_scaling: true,
   grams: 1000, desiccant: 'ms3a', tau_h: '',

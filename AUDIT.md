@@ -220,3 +220,32 @@ substep"):
   water has nowhere to go; the toggle is nearly inert there.
 - First-fog events in spring from desorption: artefact. Removed by the
   coupled step.
+
+## 6. Corrections made 2026-09-15: the two layers were modelled in parallel
+
+**What was wrong.** Section 3.1 derived a cavity ACH for each layer at the same fixed operating pressure (3 Pa plus wind on the outdoor path) and summed them, with both streams feeding the cavity every hour. That is two independent leaks in parallel. A two-layer assembly is two leaks in series: one signed pressure difference between room and outdoors, the cavity at a pressure in between, the same air through both layers, fed from the high-pressure side only. The audit's own row 1 ("largest single uncertainty: operating pressure") was pointing at the symptom; the structural error was the summing.
+
+**Size of the error.** For equal layers each takes half the pressure, so series flow is C·(ΔP/2)^0.65 against parallel 2·C·ΔP^0.65: parallel is 2^1.65 = 3.1× too high. For a retrofit 60× tighter than the existing window (0.005 vs 0.30 cfm/ft²) parallel gave 45 ACH at 3 Pa where series gives 0.74 ACH: 60× too high, and attributed 98 % of the moisture to outdoor air when the tight retrofit was the only thing deciding the flow. On the 277 Park Ave fixture, 1000 g of 3A, the parallel model filled the sieve in under 0.05 yr; series gives 0.13 yr. Section 1 rows 1 and 4 and the last ASSUMPTIONS line in app.py described the parallel model and are superseded by this section.
+
+**What replaced it (engine/pressure.py).**
+
+    ΔP(h) = P_HVAC(h) + (ρ_out − ρ_in)·g·h_NPL − ½ρ v(h)² C_p(θ)      [Pa, room minus outdoors]
+    q(h)  = |ΔP|^n / (C_out^(−1/n) + C_in^(−1/n))^n                    n = 0.65, C = AL·18.29/75^n
+    ΔP > 0: q enters as room air;  ΔP < 0: q enters as outdoor air;  ΔP = 0: breathing only
+
+- P_HVAC: +5 Pa weekdays 07 to 19, 0 Pa otherwise. Design range 5 to 25 Pa (ideal 12.5); field measurements in existing buildings 1 to 2 Pa; night setback ≈ 0. Parameter. ESTIMATE.
+- Stack: neutral plane at mid-height (uniform leakage), h from floor and floor count. Parameter. ESTIMATE of the neutral plane.
+- Wind: C_p from the angle between station wind direction and facade normal, table (0°: +0.60, 45°: +0.25, 90°: −0.50, 135°: −0.40, 180°: −0.30), face-averaged values for a rectangular building. Station wind at 10 m, no height or terrain correction. ESTIMATE. If the weather file has no wind direction (files cached before 2026-09-15), every windy hour is treated as windward, C_p = 0.6, which is conservative for outdoor-air ingress.
+- Breathing: ACH = max(0, T_air(h−1) − T_air(h)) / T_air(h), split between the sides by flow coefficient. Ideal gas, no further assumption.
+- Not modelled: gust pumping through one leaky layer with the other hermetic (ΔP/P_atm ≈ 1e-4 of the cavity volume per gust). Only matters below ~0.01 ACH. Listed for the hermetic case.
+
+**Verification.** engine/pressure.py closed form checked against a 200-step bisection of C_out·x^n = C_in·(ΔP − x)^n (tests/test_pressure.py). Series run with constant +12 Pa, no wind, no stack reproduces the legacy engine fed with the same ACH on the room path only, to 1e-4 (tests/test_series_equivalence.py): the rework touched only how the ACH and its side are decided. Property tests: one side fed per hour; through-flow never exceeds the tighter layer alone at the full |ΔP|; tightening a layer never raises flow; a hermetic layer leaves breathing only; fed side follows the sign (tests/test_properties.py).
+
+**Consequence for the product.** The lifetime is set by the tighter layer, for INOVUES the retrofit seal, and once that is airtight by the sealant's vapour permeability (silicone ≈ 30 g/yr for the fixture window, which alone caps 1000 g of 3A at ≈ 6 yr; PIB 100× less). Sweep on the fixture, old window 0.30, retrofit rating swept: 0.005 → 0.13 yr; 0.001 → 0.48 yr; 0.0002 → 1.7 yr; 0.0001 → 2.7 yr; 0.0 → 6.0 yr. The E283 detection floor (0.005) is not hermetic. The presets now bracket the unknown with "Hermetic, IGU-grade" (0.0) and "Wet-sealed" (0.005). A cavity pressure-decay test on an installed unit is the measurement that replaces both.
+
+**Revised ranking (replaces §1 rows 1 and 4).**
+1. Retrofit seal leakage below the E283 floor: decides weeks vs years. Unmeasured.
+2. Sealant vapour permeability (silicone vs PIB): the floor once 1 is airtight. Published ranges only.
+3. HVAC pressurisation and its schedule: decides room-fed vs outdoor-fed hours; ±factor 1.5 on flow between 0 and 12 Pa.
+4. C_p table and the missing height/terrain correction: ±factor 1.5 on windy-hour flow.
+5. Neutral plane position: ±3 Pa on tall buildings.
