@@ -45,7 +45,7 @@ NSRDB_TMY_URL = "https://developer.nlr.gov/api/nsrdb/v2/solar/nsrdb-GOES-tmy-v4-
 #: pressure in the psychrometrics.
 NSRDB_ATTRIBUTES = (
     "air_temperature,relative_humidity,surface_pressure,"
-    "ghi,dni,dhi,wind_speed,cloud_type"
+    "ghi,dni,dhi,wind_speed,wind_direction,cloud_type"
 )
 
 DEFAULT_TIMEOUT = 120
@@ -157,6 +157,10 @@ class WeatherYear:
     dni_w_m2: list[float] = field(default_factory=list, repr=False)
     dhi_w_m2: list[float] = field(default_factory=list, repr=False)
     wind_m_s: list[float] = field(default_factory=list, repr=False)
+    #: Direction the wind blows FROM, degrees clockwise from north (NSRDB
+    #: convention). Empty when not fetched; the pressure model then falls
+    #: back to a direction-agnostic wind term.
+    wind_dir_deg: list[float] = field(default_factory=list, repr=False)
     cloud_type: list[float] = field(default_factory=list, repr=False)
 
     def __post_init__(self) -> None:
@@ -322,6 +326,7 @@ def parse_nsrdb_csv(text: str) -> WeatherYear:
     i_dni = optional_column("DNI")
     i_dhi = optional_column("DHI")
     i_wind = optional_column("Wind Speed")
+    i_wdir = optional_column("Wind Direction")
     i_cloud = optional_column("Cloud Type")
 
     t_out_c: list[float] = []
@@ -331,6 +336,7 @@ def parse_nsrdb_csv(text: str) -> WeatherYear:
     dni: list[float] = []
     dhi: list[float] = []
     wind: list[float] = []
+    wdir: list[float] = []
     cloud: list[float] = []
 
     for row in rows[3:]:
@@ -343,7 +349,7 @@ def parse_nsrdb_csv(text: str) -> WeatherYear:
             # NSRDB reports pressure in millibar (hPa); 1 mbar = 100 Pa.
             pressures.append(float(row[i_p]) * 100.0)
         for idx, sink in ((i_ghi, ghi), (i_dni, dni), (i_dhi, dhi),
-                          (i_wind, wind), (i_cloud, cloud)):
+                          (i_wind, wind), (i_wdir, wdir), (i_cloud, cloud)):
             if idx is not None:
                 sink.append(float(row[idx]))
 
@@ -372,6 +378,7 @@ def parse_nsrdb_csv(text: str) -> WeatherYear:
         dni_w_m2=dni,
         dhi_w_m2=dhi,
         wind_m_s=wind,
+        wind_dir_deg=wdir,
         cloud_type=cloud,
     )
 
@@ -391,6 +398,11 @@ def _cache_read(path: Path) -> WeatherYear | None:
         return None
     try:
         payload = json.loads(path.read_text())
+        # A file written before wind direction was fetched is a miss, not a
+        # hit: loading it would silently run the pressure model without a
+        # wind sign. Refetch once and the cache is complete again.
+        if not payload.get("wind_dir_deg"):
+            return None
         return WeatherYear(**payload)
     except (json.JSONDecodeError, TypeError, WeatherError, OSError):
         return None
