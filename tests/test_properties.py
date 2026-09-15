@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 from dataclasses import replace
 
+import pytest
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from engine.geometry import CavityGeometry
@@ -72,6 +73,9 @@ def inputs(draw, **fixed):
                           weekdays_only=draw(st.booleans())),
         facade_azimuth_deg=draw(st.one_of(st.none(), st.floats(0, 360))),
         floor_height_m=draw(st.floats(2.5, 5.0)),
+        loops=draw(st.booleans()),
+        loop_k=draw(st.floats(0.0, 1.0)),
+        loop_exponent=draw(st.floats(0.5, 1.0)),
     )
     floors = draw(st.integers(1, 40))
     kw["building_floors"] = floors
@@ -194,8 +198,10 @@ def test_per_area_scaling(w, inp):
     """Quadruple the glass and the grams: same fill hour. Leakage is per m2
     of window so ACH is unchanged; the model is per m2 throughout.
     Sealant diffusion is the one term that is per PERIMETER (2x, not 4x),
-    so it is switched off here; it has its own bound below."""
-    inp = replace(inp, bead_width_m=0.0)
+    so it is switched off here; it has its own bound below. The single-sided
+    loop is per window HEIGHT (a taller window is a taller chimney), so it
+    is switched off too; test_taller_window_has_stronger_loop covers it."""
+    inp = replace(inp, bead_width_m=0.0, loops=False)
     g = inp.geometry
     big = replace(inp, geometry=CavityGeometry(2 * g.width_m, 2 * g.height_m, g.offset_m),
                   desiccant_grams=4 * inp.desiccant_grams)
@@ -247,7 +253,7 @@ def test_sealed_cavity_only_has_its_own_water(w, inp):
 # ---------------------------------------------------------------------------
 
 @settings(**SETTINGS)
-@given(weather_years(), inputs(series_model=True, breathing=False))
+@given(weather_years(), inputs(series_model=True, breathing=False, loops=False))
 def test_series_feeds_one_side_per_hour(w, inp):
     tb = build_tables(inp, w, None)
     for a_out, a_tot in zip(tb.ach_out, tb.ach_total):
@@ -256,7 +262,7 @@ def test_series_feeds_one_side_per_hour(w, inp):
 
 
 @settings(**SETTINGS)
-@given(weather_years(), inputs(series_model=True, breathing=False))
+@given(weather_years(), inputs(series_model=True, breathing=False, loops=False))
 def test_series_flow_never_exceeds_tighter_layer_alone(w, inp):
     """The tighter layer at the FULL |dP| is an upper bound on through-flow."""
     tb = build_tables(inp, w, None)
@@ -267,7 +273,7 @@ def test_series_flow_never_exceeds_tighter_layer_alone(w, inp):
 
 
 @settings(**SETTINGS)
-@given(weather_years(), inputs(series_model=True, breathing=False), st.floats(0.05, 0.95))
+@given(weather_years(), inputs(series_model=True, breathing=False, loops=False), st.floats(0.05, 0.95))
 def test_tightening_a_layer_never_raises_flow(w, inp, factor):
     a = build_tables(inp, w, None).ach_total
     b = build_tables(replace(inp, al_in=inp.al_in * factor), w, None).ach_total
@@ -275,7 +281,7 @@ def test_tightening_a_layer_never_raises_flow(w, inp, factor):
 
 
 @settings(**SETTINGS)
-@given(weather_years(), inputs(series_model=True, al_in=0.0))
+@given(weather_years(), inputs(series_model=True, al_in=0.0, loops=False))
 def test_hermetic_layer_leaves_breathing_only(w, inp):
     tb = build_tables(inp, w, None)
     assert max(tb.ach_total) < 0.2                    # a 50 K hourly swing would be 0.17
@@ -284,9 +290,45 @@ def test_hermetic_layer_leaves_breathing_only(w, inp):
 
 
 @settings(**SETTINGS)
-@given(weather_years(), inputs(series_model=True, breathing=False))
+@given(weather_years(), inputs(series_model=True, breathing=False, loops=False))
 def test_fed_side_follows_pressure_sign(w, inp):
     tb = build_tables(inp, w, None)
     for a_out, a_tot, dp in zip(tb.ach_out, tb.ach_total, tb.dp_pa):
         if a_tot > 0:
             assert (a_out > 0) == (dp < 0)
+
+
+@settings(**SETTINGS)
+@given(weather_years(), inputs(series_model=True, loops=True))
+def test_loop_only_through_its_own_layer_and_never_negative(w, inp):
+    tb = build_tables(inp, w, None)
+    assert all(x >= 0.0 for x in tb.loop_out) and all(x >= 0.0 for x in tb.loop_in)
+    if inp.al_out == 0.0:
+        assert max(tb.loop_out) == 0.0
+    if inp.al_in == 0.0:
+        assert max(tb.loop_in) == 0.0
+    if inp.loop_k == 0.0:
+        assert max(tb.loop_out) == 0.0 and max(tb.loop_in) == 0.0
+
+
+@settings(**SETTINGS)
+@given(weather_years(), inputs(series_model=True, breathing=False, loops=True), st.floats(0.05, 0.95))
+def test_loops_never_lower_total_exchange_and_shrink_with_k(w, inp, factor):
+    with_loops = build_tables(inp, w, None)
+    without = build_tables(replace(inp, loops=False), w, None)
+    assert all(a >= b * (1 - 1e-9) for a, b in zip(with_loops.ach_total, without.ach_total))
+    smaller_k = build_tables(replace(inp, loop_k=inp.loop_k * factor), w, None)
+    assert all(a <= b * (1 + 1e-9) + 1e-12 for a, b in zip(smaller_k.loop_out, with_loops.loop_out))
+
+
+@settings(**SETTINGS)
+@given(weather_years(), inputs(series_model=True, loops=True, loop_k=0.75), st.floats(1.2, 3.0))
+def test_taller_window_has_stronger_loop(w, inp, factor):
+    g = inp.geometry
+    tall = replace(inp, geometry=CavityGeometry(g.width_m, g.height_m * factor, g.offset_m))
+    a, b = build_tables(inp, w, None), build_tables(tall, w, None)
+    # Same first hour on both (cavity temperature seeds identically), then the
+    # cavity temperature histories diverge, so only the first hour is exact.
+    if a.loop_out[0] > 0:
+        assert b.loop_out[0] == pytest.approx(a.loop_out[0] * factor ** inp.loop_exponent, rel=1e-6)
+    assert sum(b.loop_out) >= sum(a.loop_out) * (1 - 1e-9)

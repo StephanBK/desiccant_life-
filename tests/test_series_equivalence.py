@@ -27,7 +27,7 @@ def test_series_matches_legacy_room_path(weather):
     geo = CavityGeometry.from_inches(60, 96, 0.6)
     common = dict(geometry=geo, f_cold=0.30, f_warm=0.59, u_assembly=1.703,
                   desiccant_grams=200.0, absorptance=0.0, sky_radiation=False, max_years=2)
-    ser = LifetimeInputs(al_out=0.30, al_in=0.02, series_model=True, breathing=False,
+    ser = LifetimeInputs(al_out=0.30, al_in=0.02, series_model=True, breathing=False, loops=False,
                          hvac=HvacSchedule(occupied_pa=12.0, unoccupied_pa=12.0, start_h=0, end_h=24, weekdays_only=False),
                          # Window 0.5 mm below the neutral plane: stack is < 1e-3 Pa, i.e. off.
                          building_floors=2, window_floor=1, floor_height_m=0.001, t_room_c=21.0, **common)

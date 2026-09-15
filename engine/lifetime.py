@@ -68,7 +68,8 @@ from engine.cavity import (
 from engine.desiccant import DESICCANTS, DEFAULT_DESICCANT, DesiccantType, uptake_step
 from engine.geometry import CavityGeometry
 from engine.pressure import (
-    DEFAULT_FLOOR_HEIGHT_M, DEFAULT_FLOORS, DEFAULT_WINDOW_FLOOR, HvacSchedule,
+    DEFAULT_FLOOR_HEIGHT_M, DEFAULT_FLOORS, DEFAULT_LOOP_EXPONENT, DEFAULT_LOOP_K,
+    DEFAULT_WINDOW_FLOOR, HvacSchedule,
     breathing_ach, breathing_split, height_above_npl_m, hour_flow,
 )
 from engine.leakage import (
@@ -182,6 +183,12 @@ class LifetimeInputs:
     floor_height_m: float = DEFAULT_FLOOR_HEIGHT_M
     facade_azimuth_deg: float | None = None
     breathing: bool = True
+    # Single-sided buoyant loop through each layer's own cracks (chimney
+    # between its low and high cracks). k = fraction of the window height
+    # between average inlet and outlet; exponent for the sub-1 Pa flow.
+    loops: bool = True
+    loop_k: float = DEFAULT_LOOP_K
+    loop_exponent: float = DEFAULT_LOOP_EXPONENT
     # Sealant vapour diffusion, the floor once air leakage is at the test
     # detection limit. Key into engine.leakage.SEALANTS; bead in metres.
     sealant_out: str = DEFAULT_SEALANT
@@ -224,6 +231,10 @@ class LifetimeInputs:
             raise ValueError("ACH values cannot be negative")
         # Validates floors; the value itself is recomputed where used.
         height_above_npl_m(self.window_floor, self.building_floors, self.floor_height_m)
+        if not 0.0 <= self.loop_k <= 1.0:
+            raise ValueError("loop_k must be within 0..1")
+        if not 0.5 <= self.loop_exponent <= 1.0:
+            raise ValueError("loop_exponent must be within 0.5..1.0")
         if self.desiccant_grams < 0:
             raise ValueError("desiccant_grams cannot be negative")
         if self.desiccant_key not in DESICCANTS:
@@ -272,6 +283,9 @@ class HourTables:
     diff_kg_per_m2_h: list[float]
     #: Signed P_room - P_outdoor per hour (series model); empty for legacy.
     dp_pa: list[float] = field(default_factory=list)
+    #: Single-sided loop ACH through each layer (series model); empty for legacy.
+    loop_out: list[float] = field(default_factory=list)
+    loop_in: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -392,6 +406,9 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
     series = inp.uses_series_model
     h_npl = inp.height_above_npl_m if series else 0.0
     dp_l: list[float] = []
+    loop_out_l: list[float] = []
+    loop_in_l: list[float] = []
+    win_h = inp.geometry.height_m if (series and inp.loops) else 0.0
 
     t_cold_l, t_air_l, w_sat_l, m_cav_l, w_out_l = [], [], [], [], []
     a_out_l, a_tot_l, w_sup_l, rise_l, diff_l = [], [], [], [], []
@@ -422,9 +439,14 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
                 wind_from_deg=weather.wind_dir_deg[i] if has_wdir else None,
                 facade_azimuth_deg=inp.facade_azimuth_deg, height_above_npl=h_npl,
                 hvac=inp.hvac, p_atm_pa=p_atm,
+                # Loops need the cavity air temperature, which this hour's
+                # ACH sets, so the previous hour's value is used (first
+                # hour: midway between room and outdoors).
+                t_cavity_c=(t_air_l[-1] if t_air_l else 0.5 * (t_o + inp.t_room_c)) if win_h > 0 else None,
+                window_height_m=win_h, loop_k=inp.loop_k, loop_exponent=inp.loop_exponent,
             )
             a_out, a_in = hf.ach_out, hf.ach_in
-            dp_l.append(hf.dp_pa)
+            dp_l.append(hf.dp_pa); loop_out_l.append(hf.loop_out); loop_in_l.append(hf.loop_in)
         elif inp.wind_scaling and inp.al_out is not None:
             a_out = ach_from_air_leakage(inp.al_out, inp.dp_pa + wind_pressure_pa(wind), gap)
             a_in = inp.ach_in
@@ -486,7 +508,7 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
         n=n, t_out_c=list(weather.t_out_c), w_out=w_out_l, t_cold_c=t_cold_l,
         t_air_c=t_air_l, w_sat_cold=w_sat_l, m_cav=m_cav_l, ach_out=a_out_l,
         ach_total=a_tot_l, w_supply=w_sup_l, vent_rise_k=rise_l, w_room=w_room,
-        diff_kg_per_m2_h=diff_l, dp_pa=dp_l,
+        diff_kg_per_m2_h=diff_l, dp_pa=dp_l, loop_out=loop_out_l, loop_in=loop_in_l,
     )
 
 

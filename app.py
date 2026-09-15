@@ -36,7 +36,8 @@ from engine.leakage import (
 from engine.lifetime import LifetimeInputs, LifetimeResult, run_lifetime
 from engine.report import workbook_bytes
 from engine.pressure import (
-    CP_TABLE, DEFAULT_FLOOR_HEIGHT_M, DEFAULT_FLOORS, DEFAULT_OCC_END_H, DEFAULT_OCC_START_H,
+    CP_TABLE, DEFAULT_FLOOR_HEIGHT_M, DEFAULT_FLOORS, DEFAULT_LOOP_EXPONENT, DEFAULT_LOOP_K,
+    DEFAULT_OCC_END_H, DEFAULT_OCC_START_H,
     DEFAULT_P_OCCUPIED_PA, DEFAULT_P_UNOCCUPIED_PA, DEFAULT_WINDOW_FLOOR, HvacSchedule,
 )
 from engine.solar import ORIENTATIONS, poa_series
@@ -68,6 +69,7 @@ DEFAULTS = {
     "occ_start_h": DEFAULT_OCC_START_H, "occ_end_h": DEFAULT_OCC_END_H, "weekdays_only": True,
     "floors": DEFAULT_FLOORS, "window_floor": DEFAULT_WINDOW_FLOOR, "floor_height_ft": round(DEFAULT_FLOOR_HEIGHT_M / 0.3048, 2),
     "series_model": True, "breathing": True,
+    "loops": True, "loop_k": DEFAULT_LOOP_K, "loop_n": DEFAULT_LOOP_EXPONENT,
 }
 
 
@@ -193,6 +195,9 @@ def _parse_inputs() -> tuple[LifetimeInputs, dict]:
             dp_pa=_float("dp_pa", DEFAULTS["dp_pa"], 0.0, 75.0),
             series_model=_bool("series_model", DEFAULTS["series_model"]),
             breathing=_bool("breathing", DEFAULTS["breathing"]),
+            loops=_bool("loops", DEFAULTS["loops"]),
+            loop_k=_float("loop_k", DEFAULTS["loop_k"], 0.0, 1.0),
+            loop_exponent=_float("loop_n", DEFAULTS["loop_n"], 0.5, 1.0),
             hvac=hvac,
             building_floors=_int("floors", DEFAULTS["floors"], 1, 200),
             window_floor=_int("window_floor", DEFAULTS["window_floor"], 1, 200),
@@ -227,6 +232,7 @@ def _parse_inputs() -> tuple[LifetimeInputs, dict]:
         "al_out": inp.al_out, "al_in": inp.al_in, "dp_pa": inp.dp_pa,
         "ach_out": round(inp.ach_out, 4), "ach_in": round(inp.ach_in, 4), "wind_scaling": inp.wind_scaling,
         "series_model": inp.uses_series_model, "breathing": inp.breathing,
+        "loops": inp.loops, "loop_k": inp.loop_k, "loop_n": inp.loop_exponent,
         "p_occ_pa": hvac.occupied_pa, "p_unocc_pa": hvac.unoccupied_pa,
         "occ_start_h": hvac.start_h, "occ_end_h": hvac.end_h, "weekdays_only": hvac.weekdays_only,
         "floors": inp.building_floors, "window_floor": inp.window_floor,
@@ -341,6 +347,7 @@ def _result_payload(r: LifetimeResult, echo: dict, location, weather, cached: bo
             "ach_out": _round_list(y1["ach_out"], 3),
             "ach_total": _round_list(tb.ach_total, 4),
             "dp_pa": _round_list(tb.dp_pa, 2),
+            "loop_out": _round_list(tb.loop_out, 4), "loop_in": _round_list(tb.loop_in, 4),
             "w_supply_gkg": _round_list([x * 1000 for x in tb.w_supply], 3),
             "vent_rise_f": _round_list([x * 1.8 for x in tb.vent_rise_k], 3),
         }
@@ -356,9 +363,13 @@ def _pressure_summary(tb, weather) -> dict:
         return {"series_model": False, "mean_ach": round(mean_ach, 4)}
     room = sum(1 for d in tb.dp_pa if d > 0)
     out = sum(1 for d in tb.dp_pa if d < 0)
+    lo = sum(tb.loop_out) / n if tb.loop_out else 0.0
+    li = sum(tb.loop_in) / n if tb.loop_in else 0.0
     return {
         "series_model": True,
         "mean_ach": round(mean_ach, 4),
+        "mean_through_ach": round(max(mean_ach - lo - li, 0.0), 4),
+        "mean_loop_out_ach": round(lo, 4), "mean_loop_in_ach": round(li, 4),
         "max_ach": round(max(a_tot), 4),
         "hours_room_fed": room, "hours_outdoor_fed": out, "hours_neutral": n - room - out,
         "mean_abs_dp_pa": round(sum(abs(d) for d in tb.dp_pa) / n, 3),
@@ -375,6 +386,7 @@ ASSUMPTIONS = [
     "HVAC pressurisation defaults +5 Pa occupied (weekdays 07 to 19), 0 Pa unoccupied: the low end of the 5 to 25 Pa design range, matching field measurements in existing buildings. ESTIMATE; the value is a parameter.",
     "Stack pressure from the window's height above a mid-height neutral plane (uniform leakage assumed); building height and floor are parameters.",
     "Wind pressure 0.5 rho v^2 Cp with Cp from the wind angle off the facade (+0.6 windward, -0.5 side, -0.3 leeward; ESTIMATE from face-averaged values). Station wind at 10 m, no height or terrain correction. If the weather file lacks wind direction, every windy hour is treated as windward (conservative).",
+    "Each layer also has a SINGLE-SIDED buoyant loop through its own cracks (warm air out the high crack, cold air in the low crack, nothing through the other layer): dP_loop = |rho_side - rho_cavity| g k H, flow of half the layer at dP_loop/2. k (fraction of window height between average inlet and outlet) defaults 0.75, ESTIMATE; exponent 0.65 kept below 1 Pa though flow is probably laminar there (n near 1 would give up to 6x less; conservative for life). Gust pumping and the wind-pressure gradient over the face are not modelled.",
     "Thermal breathing (cavity air contracting as it cools, drawing in from both sides in proportion to their leakage) is included; gust pumping (compression by dP/P_atm per gust through one leaky layer) is not, and only matters below about 0.01 ACH.",
     "Wet-sealed preset (0.005 cfm/ft2) is the ASTM E283 detection floor, not a measurement of INOVUES seals; a cavity pressurisation test would replace it.",
     "Sealant vapour diffusion uses ASTM E96 permeability ranges (silicone 30, PIB 0.3 g.mm/m2/day) with the cavity taken as dry: an upper bound on the floor.",
@@ -382,7 +394,7 @@ ASSUMPTIONS = [
     "Evaporation from the pane is instantaneous up to saturation (upper bound on drying).",
     "Retained film cap 100 um; visible threshold 5 um; both unmeasured.",
     "'Exhausted' = 95 % of 25 degC capacity; at 35 % room RH the sieve equilibrates at 96.7 %, so thresholds above that never fire.",
-    "Lifetime is set almost entirely by the TIGHTER layer (for INOVUES, the SWR seal) and, once that is airtight, by the sealant's vapour permeability; the old window's leakage mostly decides which air fills the cavity, not how much.",
+    "Lifetime: the tighter layer sets the THROUGH-flow, but each layer's own leakage sets its single-sided LOOP with the side it faces, so BOTH seals matter. A hermetic retrofit over an unsealed old window still breathes outdoor air at a few ACH through the old window alone. Once both are airtight the sealant's vapour permeability is the floor.",
     "The two hermetic / wet-sealed presets bracket one unknown: what a field-applied silicone wet seal actually leaks. Weeks at the E283 floor, years at IGU-grade. A cavity pressure-decay test on an installed unit is the measurement that settles it.",
     "TMY year repeated; no climate trend, no year-to-year variation.",
 ]
