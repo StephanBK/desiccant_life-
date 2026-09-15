@@ -70,9 +70,12 @@ export function SourceLegend({ c, compact }) {
 // The run-off sentence rests on two estimates from the pane model (film
 // cap 100 um, instant evaporation), so it is returned with a flag and the
 // card tags it.
-export function readingLine(c, grams, exhausted) {
+export function readingLine(c, grams, exhausted, lifeTotal, capacity) {
   const unit = c.perYear ? ' g per year' : ' g'
-  if (hasShares(c)) return `All three paths were sources: the cavity air next to a fresh sieve is drier than anything outside it. Together they delivered ${g1(c.total_g)}${unit}, which is what the sieve took.`
+  const life = c.perYear && exhausted && lifeTotal != null
+    ? ` Over the ${fmt.n(c.years, 1)}-year life that is ${g1(lifeTotal)} g${capacity ? ` of the ${fmt.n(capacity, 0)} g it holds (full at 95 %)` : ''}.`
+    : ''
+  if (hasShares(c)) return `All three paths were sources: the cavity air next to a fresh sieve is drier than anything outside it. Together they delivered ${g1(c.total_g)}${unit}, which is what the sieve took.${life}`
   const parts = SRC.map((s) => { const g = c[`${s.k}_g`]; return `${s.label.toLowerCase()} ${g < 0 ? 'removed' : 'added'} ${g1(Math.abs(g))}${unit}` }).join(', ')
   const net = c.total_g
   let tail
@@ -92,7 +95,9 @@ export function SourceCard({ contributions, headline, inputs }) {
   const c = scaleWindow(contributions.life, contributions.life_hours)
   const exhausted = headline.exhausted_hour !== null
   const title = exhausted
-    ? `over the sieve's life, ${fmt.n(contributions.life_hours)} hours`
+    ? (c.perYear
+        ? `per year, averaged over the sieve's ${fmt.n(c.years, 1)}-year life (${fmt.n(contributions.life_hours)} hours)`
+        : `over the sieve's life, ${fmt.n(contributions.life_hours)} hours`)
     : `${c.perYear ? 'per year, averaged over' : 'over'} the ${fmt.n(c.years, c.years < 10 ? 1 : 0)}-year run${inputs?.grams > 0 ? ' (never full)' : ' (no desiccant)'}`
   return (
     <div className="card source">
@@ -102,7 +107,7 @@ export function SourceCard({ contributions, headline, inputs }) {
       </div>
       <SourceBar c={c} />
       <SourceLegend c={c} />
-      <p className="hint">{readingLine(c, inputs?.grams ?? 0, exhausted)}{runoffIsEstimate(c) && <> <span className="est">estimate</span> run-off depends on the 100 µm film cap and instant morning evaporation, both unmeasured.</>} A path removes water when its air is drier than the cavity air: cold outdoor air in winter, room air in a humid summer.</p>
+      <p className="hint">{readingLine(c, inputs?.grams ?? 0, exhausted, contributions.life?.total_g, inputs?.capacity_g)}{runoffIsEstimate(c) && <> <span className="est">estimate</span> run-off depends on the 100 µm film cap and instant morning evaporation, both unmeasured.</>} A path removes water when its air is drier than the cavity air: cold outdoor air in winter, room air in a humid summer.</p>
     </div>
   )
 }
