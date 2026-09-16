@@ -183,3 +183,57 @@ def test_fresh_sieve_takes_from_both_paths(weather):
     c = r.contributions()
     assert c["outdoor_g"] > 0 and c["room_g"] > 0
     assert 0 < c["outdoor_pct"] < 100 and 0 < c["room_pct"] < 100
+
+
+# ---------------------------------------------------------------------------
+# Signed, two-sided sealant diffusion
+# ---------------------------------------------------------------------------
+
+def test_split_exchange_net_signs_each_path_by_its_own_gradient():
+    """A bead facing a side drier than the cavity carries water OUT even
+    while the other bead carries water in."""
+    from engine.lifetime import split_exchange_net
+    m, dt = 0.01, 1.0
+    a_out, ad_out, a_in, ad_in = 0.0, 0.002, 0.0, 0.002
+    w_out, w_room = 0.001, 0.006
+    # operating humidity between the two: net = sum of the two bead terms
+    w_op = 0.004
+    net = (ad_out * (w_out - w_op) + ad_in * (w_room - w_op)) * m * dt
+    n_out, n_in, n_diff = split_exchange_net(net, a_out, ad_out, w_out, a_in, ad_in, w_room, m, dt)
+    assert n_out == 0.0 and n_in == 0.0
+    assert n_diff == pytest.approx(net)
+    assert ad_out * (w_out - w_op) < 0 < ad_in * (w_room - w_op)   # outdoor bead dries, room bead wets
+
+
+def test_beads_alone_cannot_push_the_cavity_above_its_wetter_neighbour(weather):
+    """No vents, no loops, no breathing, no desiccant: the only exchange is
+    the two silicone beads, each driven by its own vapour-pressure gradient.
+    The cavity humidity can then never exceed the wetter of the two sides
+    (room, or the outdoor air of the recent past). The old dry-cavity
+    inflow violated this: it kept adding water with the cavity already
+    wetter than both neighbours."""
+    inp = LifetimeInputs(
+        geometry=GEO, f_cold=0.014, f_warm=0.59, u_assembly=0.9,
+        t_room_c=21.1, rh_room=0.30, al_out=0.0, al_in=0.0, loops=False, breathing=False,
+        desiccant_grams=0.0, absorptance=0.0, sky_radiation=False, max_years=1,
+    )
+    r = run_lifetime(inp, weather, None, keep_year1=True, keep_daily=False)
+    w_cav = r.year1["w_cav"]; w_out = r.tables.w_out; w_room = r.tables.w_room
+    film = r.year1["film_kg"]
+    window = 24 * 14                      # the bead exchange is slow: allow a two-week memory of outdoor air
+    worst = 0.0; checked = 0
+    for i in range(WARMUP, len(w_cav)):
+        # Liquid stored on the pane in a cold spell re-evaporates on a warm
+        # day and can lift the air above both neighbours; that is real. The
+        # bound is on hours with no stored water.
+        if any(f > 0.0 for f in film[max(0, i - 24):i + 1]):
+            continue
+        checked += 1
+        cap = max(w_room, max(w_out[max(0, i - window):i + 1]))
+        worst = max(worst, w_cav[i] - cap)
+    assert checked > 1000
+    assert worst <= 1e-5, worst           # kg/kg; supplies are 1e-3..1e-2
+    # and the two beads are a net REMOVER over the year in a room-side-dry, winter-dry cavity
+    # is not guaranteed, but the net must stay below the dry-cavity bound.
+    bound_g = sum(r.tables.diff_kg_per_m2_h) * 1000.0 * GEO.glazing_area_m2
+    assert r.net_diffusion_g <= bound_g

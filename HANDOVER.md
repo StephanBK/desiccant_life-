@@ -103,6 +103,33 @@ Water-source accounting and the no-desiccant equivalence check.
   outdoor net < 0 at 0 g with a loose existing window, fresh sieve takes
   from both paths.
 
+## Session 4 (2026-09-16) summary
+
+- Study runs for 277 Park (3 retrofit glasses x 3 seal scenarios, 3,770 g
+  3A; then 3 glasses x 2 retrofit seals x 3 existing-window seals at 0 g)
+  drove the correction below. Figures and scripts live outside the repo
+  (Stephan's downloads: 277Park_desiccant_study.pdf, 277Park_no_desiccant_study.pdf,
+  figs.py, figs_nodes.py).
+- Engine: sealant bead diffusion made signed and two-sided (AUDIT 3.9).
+  New: HourTables.ach_diff_out / ach_diff_in, split_exchange_net().
+  Old fixed j_diff path retired (coupled_substep still accepts j_diff=0).
+- Tests: two new (four-way split signs; beads alone cannot push the cavity
+  above its wetter neighbour on film-free hours). Four pre-existing
+  hypothesis edges fixed in the tests, each verified to fail identically on
+  the old engine: 6 h floors for gram-scale sieves (x2), loop-vs-k check
+  reduced to first hour plus annual total, and the never-fills-at-higher-flow
+  equilibrium artifact skipped with assume(). Sealed-cavity invariant now
+  "net bead flux <= dry-cavity bound" instead of ">= 0". 312 tests.
+- Findings worth carrying: without desiccant, visible fog needs a way in
+  (wet-sealed retrofit passing ~0.5 ACH of room air under HVAC +5 Pa) and
+  no way out (old window 0.1 cfm/ft2 or tighter); a hermetic retrofit or a
+  leaky old window each prevent it. Glass type matters only without
+  desiccant (VIG coldest pane, worst). With desiccant the sieve loses control
+  of the dew point at ~60 % loading, before the 95 % "full" mark.
+- Open engine items: run N years past saturation (scenario C's later
+  winters were never simulated); "dew-point control lost" as a headline
+  metric; price per kg input for $/yr of protection.
+
 ## Decisions log
 
 - 2026-09-14: contributions are NET (signed), not gross; sealant

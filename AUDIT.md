@@ -201,6 +201,36 @@ substep"):
   of an INOVUES seal. Between 0.005 and 0 the answer moves from 16 days
   to 6.6 years. Item 1 of section 4 (pressurisation test) resolves it.
 
+## 3.9 Correction 2026-09-16: bead diffusion is signed and two-sided
+
+Section 3.8 took the cavity as dry and clamped each bead's flux at zero,
+so diffusion could only ADD water, at the full source vapour pressure,
+regardless of the cavity's own state. That is a fair upper bound while a
+sieve holds the cavity near 0 % RH (the case the term was built for) and
+wrong once the cavity is wetter than a neighbour, which is the no-desiccant
+hermetic case: there the model kept pumping ~31 g/yr in with the cavity
+already above both room and outdoor vapour pressure, and reported ~5,000
+film hours a year.
+
+Now each bead is a signed path in the same quasi-steady balance as the
+vents: J = G . (p_source - p_cavity), G = P . perimeter . bead width /
+bead depth, room-to-cavity through the retrofit bead and outdoor-to-cavity
+through the existing window's bead. The flux is linearised in W at each
+source's humidity (dp/dW of p = W.P/(0.622 + W)); exact when the cavity
+matches the source, within a few per cent otherwise (property test allows
+10 %). Contributions are split four ways and the two bead parts are
+reported together as "diffusion", signed.
+
+Effect (277 Park fixture weather, VIG retrofit, 0 g): hermetic retrofit
+over a wet-sealed old window goes from 5,126 to 2,475 film hours and
+0.066 to 0.014 kg/m2 condensed, with the beads a net remover (-3.4 g/yr).
+Wet-sealed both sides moves little (through-flow dominates). Desiccant
+lifetimes in the hermetic and mixed cases lengthen slightly, since the
+bead facing cold winter air now takes some water out.
+
+Still open: the bead conductance itself (E96 ranges, x2 uncertainty), and
+the linearisation above 0.02 kg/kg.
+
 ## 4. What would tighten the numbers most, in order
 
 1. A measured operating pressure across an installed SWR cavity (a

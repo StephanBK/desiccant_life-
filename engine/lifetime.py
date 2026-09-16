@@ -280,7 +280,16 @@ class HourTables:
     w_supply: list[float]
     vent_rise_k: list[float]
     w_room: float
+    #: Dry-cavity upper bound of the two beads' inward diffusion, kg/m2/h
+    #: (reporting only; the solver uses the signed conductances below).
     diff_kg_per_m2_h: list[float]
+    #: Sealant vapour diffusion as EQUIVALENT exchange rates (1/h): the
+    #: bead's flux is G.(p_src - p_cav) with G in kg/m2/h/Pa, and with
+    #: p_w ~ W.P/0.622 that is ach_diff . m_cav . (W_src - W_cav), the same
+    #: form as a vent path. Signed and two-sided as a result: a bead
+    #: DRIES the cavity when its side is drier. Empty means no diffusion.
+    ach_diff_out: list[float] = field(default_factory=list)
+    ach_diff_in: list[float] = field(default_factory=list)
     #: Signed P_room - P_outdoor per hour (series model); empty for legacy.
     dp_pa: list[float] = field(default_factory=list)
     #: Single-sided loop ACH through each layer (series model); empty for legacy.
@@ -416,6 +425,17 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
     area = inp.geometry.glazing_area_m2
     pw_room = p_w_from_w(w_room, p_atm)
     j_in = sealant_diffusion_kg_per_h(perim, inp.bead_width_m, inp.bead_depth_m, SEALANTS[inp.sealant_in], pw_room) / area
+    # Bead conductances, kg per m2 of glass per hour per Pa of vapour
+    # pressure difference (the same E96 permeability, just not multiplied
+    # by a fixed dry-cavity dp).
+    g_in = sealant_diffusion_kg_per_h(perim, inp.bead_width_m, inp.bead_depth_m, SEALANTS[inp.sealant_in], 1.0) / area
+    g_out = sealant_diffusion_kg_per_h(perim, inp.bead_width_m, inp.bead_depth_m, SEALANTS[inp.sealant_out], 1.0) / area
+    # dp_w/dW of p_w = W.P/(0.622 + W), taken at each source's own humidity
+    # (exact when the cavity matches the source, within a few % otherwise).
+    slope = lambda w_src: p_atm * 0.622 / (0.622 + w_src) ** 2
+    pw_per_w_in = slope(w_room)
+    ad_out_l: list[float] = []
+    ad_in_l: list[float] = []
 
     for i in range(n):
         t_o = weather.t_out_c[i]
@@ -487,6 +507,9 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
         w_sup_l.append(w_sup); rise_l.append(rise)
         j_out = sealant_diffusion_kg_per_h(perim, inp.bead_width_m, inp.bead_depth_m, SEALANTS[inp.sealant_out], p_w_from_w(w_out, p_atm)) / area if w_out > 0 else 0.0
         diff_l.append(j_in + j_out)
+        m_c = m_cav_l[-1]
+        ad_out_l.append(g_out * slope(w_out) / m_c if m_c > 0 else 0.0)
+        ad_in_l.append(g_in * pw_per_w_in / m_c if m_c > 0 else 0.0)
 
     if series and inp.breathing:
         # Breathing needs the cavity air temperature series, so it is added
@@ -508,7 +531,8 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
         n=n, t_out_c=list(weather.t_out_c), w_out=w_out_l, t_cold_c=t_cold_l,
         t_air_c=t_air_l, w_sat_cold=w_sat_l, m_cav=m_cav_l, ach_out=a_out_l,
         ach_total=a_tot_l, w_supply=w_sup_l, vent_rise_k=rise_l, w_room=w_room,
-        diff_kg_per_m2_h=diff_l, dp_pa=dp_l, loop_out=loop_out_l, loop_in=loop_in_l,
+        diff_kg_per_m2_h=diff_l, ach_diff_out=ad_out_l, ach_diff_in=ad_in_l,
+        dp_pa=dp_l, loop_out=loop_out_l, loop_in=loop_in_l,
     )
 
 
@@ -674,6 +698,25 @@ def split_vent_net(vent_net: float, a_out: float, w_out: float, a_in: float, w_r
     return a_out * m_cav * (w_out - w_op) * dt, a_in * m_cav * (w_room - w_op) * dt
 
 
+def split_exchange_net(net: float, a_out: float, ad_out: float, w_out: float,
+                       a_in: float, ad_in: float, w_room: float,
+                       m_cav: float, dt: float) -> tuple[float, float, float]:
+    """Split one step's net exchange water into (outdoor air, room air,
+    sealant diffusion). Same recovery of the operating humidity as
+    ``split_vent_net``, over the four paths (two vents, two beads); the
+    two bead parts are reported together as diffusion. Any path is
+    NEGATIVE when its side is drier than the cavity."""
+    a_m = a_out + ad_out + a_in + ad_in
+    if a_m <= 0.0 or m_cav <= 0.0 or dt <= 0.0:
+        return 0.0, 0.0, 0.0
+    w_sup = ((a_out + ad_out) * w_out + (a_in + ad_in) * w_room) / a_m
+    w_op = w_sup - net / (a_m * m_cav * dt)
+    n_out = a_out * m_cav * (w_out - w_op) * dt
+    n_in = a_in * m_cav * (w_room - w_op) * dt
+    n_diff = (ad_out * (w_out - w_op) + ad_in * (w_room - w_op)) * m_cav * dt
+    return n_out, n_in, n_diff
+
+
 def _bisect_source(D, j, w_eq, w_sat):
     """No vents, only diffusion: D(W) = j has a root above w_eq (D rises
     with W). Bracket to saturation; if even saturation cannot absorb j the
@@ -759,28 +802,35 @@ def run_lifetime(
             hour_cond = 0.0; hour_up = 0.0; hour_vent = 0.0
             a_out = tb.ach_out[i]; a_in = a_tot - a_out; w_out = tb.w_out[i]
 
-            j_diff = tb.diff_kg_per_m2_h[i]
+            # Sealant diffusion enters the SAME quasi-steady balance as the
+            # vents, as equivalent exchange rates, so it is signed and
+            # two-sided: the bead facing the drier side dries the cavity.
+            ad_out = tb.ach_diff_out[i] if tb.ach_diff_out else 0.0
+            ad_in = tb.ach_diff_in[i] if tb.ach_diff_in else 0.0
+            a_m = a_tot + ad_out + ad_in                          # moisture exchange, 1/h
+            w_sup_m = ((a_out + ad_out) * w_out + (a_in + ad_in) * tb.w_room) / a_m if a_m > 0 else w_sup
             if m_des > 0.0:
                 # Coupled air/desiccant/pane step. Substeps only need to
                 # resolve the desiccant's own time constant.
                 for _ in range(nsub):
                     w_cav, q, film, c, up, vn = coupled_substep(
-                        w_cav, q, film, w_sup, w_sat, a_tot, m_cav, m_des, des, t_air,
-                        tau, dt, inp.allow_desorption, p_atm, inp.max_film_kg, j_diff,
+                        w_cav, q, film, w_sup_m, w_sat, a_m, m_cav, m_des, des, t_air,
+                        tau, dt, inp.allow_desorption, p_atm, inp.max_film_kg, 0.0,
                     )
                     hour_cond += c
                     hour_up += up
                     hour_vent += vn
             else:
-                w0 = w_cav + j_diff / m_cav                     # diffusion, then exchange
-                w_cav, c, e, film = step_hour(w0, w_sup, w_sat, a_tot, m_cav, film, 1.0)
+                w0 = w_cav
+                w_cav, c, e, film = step_hour(w0, w_sup_m, w_sat, a_m, m_cav, film, 1.0)
                 hour_cond += c
                 hour_vent += (w_cav - w0) * m_cav + c - e
                 film, _drained = drain_excess(film, inp.max_film_kg)
-            n_out, n_in = split_vent_net(hour_vent, a_out, w_out, a_in, tb.w_room, m_cav, 1.0)
-            y_out += n_out; y_in += n_in; y_diff += j_diff
+            n_out, n_in, n_diff = split_exchange_net(
+                hour_vent, a_out, ad_out, w_out, a_in, ad_in, tb.w_room, m_cav, 1.0)
+            y_out += n_out; y_in += n_in; y_diff += n_diff
             if in_heating_season(i):
-                h_out += n_out; h_in += n_in; h_diff += j_diff
+                h_out += n_out; h_in += n_in; h_diff += n_diff
 
             hours_run += 1
             total_uptake += hour_up
