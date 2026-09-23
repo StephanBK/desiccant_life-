@@ -1,8 +1,46 @@
 # HANDOVER — Desiccant Lifetime Simulator (ANLY-003)
 
-Last session: 2026-09-23 (session 5, fog map API). Before that 2026-09-15 (session 4). State: v0.5 (series pressure
+Last session: 2026-09-23 (session 6, air relaxation fix). Before that 2026-09-15 (session 4). State: v0.5 (series pressure
 model + single-sided loops) pushed: main on GitHub at 2748f2b + the
 tab-consistency commit after it, Railway serves it.
+
+## Session 6 (2026-09-23): air relaxation fix (post-saturation fog was inflated)
+
+- Found via the 277 Park app: 4 lb showed more fog than no desiccant. Part
+  was the app (0 lb reported its start-up year); the rest was the engine.
+- BUG: coupled_substep put the cavity air at its balance humidity W*
+  instantly. Right for a hungry sieve (seconds), wrong for a full or tiny
+  one: the air then lags at the exchange rate for hours (as step_hour
+  does). The jump skipped the lead-in before condensation. 0.001 g gave
+  700 fog h/yr vs 400 at 0 g; a full 4 lb sieve without desorption 745.
+  The old "inactive desiccant" guard missed nearly-full sieves.
+- FIX: the air relaxes toward W* at lam = (a.m_cav + dD/dW)/m_cav,
+  re-linearised over RELAX_STEPS = 8 micro-steps per substep, never past
+  W*, pinned at pane saturation while condensing or while a film feeds it;
+  water balance exact per step (uptake is the residual). Hungry sieve:
+  unchanged (lam huge). After: 0.001 g 368 h (condensate within 0.4 %,
+  film within 1.8 % of 0 g), 4 lb desorption off 296 (below 0 g), 4 lb
+  desorption on 57, 8 lb desorption on 87 (test weather, year after full).
+  About 3.1 s per simulated year (was ~1.9).
+- Found in the new code and fixed: a film of 6e-323 kg (denormal) made the
+  loop evaporate it forever; films below FILM_ZERO_KG = 1e-15 are zero, and
+  a pass cap with a water-conserving safety net (RELAX_STATS counts it;
+  tests assert zero on real runs).
+- Tests: tests/test_relaxation.py (6). Three existing tests adjusted, each
+  proven first: cross-check now runs without sealant diffusion like its
+  reference (the 'sealed' case had passed because +2.5 % solver error and
+  -5 % diffusion cancelled; now -0.4 %); offset property skips cases where
+  the deeper cavity's extra trapped air water is >= 5 % of capacity (that
+  water is now conserved, the old step discarded it); sealed-cavity
+  invariant allows the phantom water below.
+- KNOWN SIMPLIFICATION (pre-existing, now visible): m_cav is recomputed
+  hourly from temperature at fixed W, so the air's water changes at hour
+  boundaries (1 g sieve, 1 ft2 sealed: 0.0017 g/yr, matched the balance
+  gap to 6 decimals). 277 Park window: ~0.07 g/yr, ~0.01 % of 8 lb
+  capacity. Kept for byte-equivalence with cavity_moisture at 0 g.
+- The humidifier effect of desorption is far smaller than the pre-fix
+  numbers suggested; the no-cold-credit question still stands but matters
+  much less.
 
 ## Session 5 (2026-09-23): opt-in fog map for the 277 Park app
 

@@ -545,6 +545,17 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
     )
 
 
+#: Micro-steps per substep for the air's relaxation toward W* (see
+#: coupled_substep). 8 resolves the exchange lag at 0.25 h substeps.
+RELAX_STEPS = 8
+#: Film below this is treated as none, kg/m2 (1e-12 um).
+FILM_ZERO_KG = 1e-15
+#: Loop passes per micro-step before the safety net finishes it (normal: 1 to 3).
+RELAX_MAX_PASSES = 12
+#: How often the safety net ran (tests assert zero on normal runs).
+RELAX_STATS = {"safety_net": 0}
+
+
 def coupled_substep(
     w_cav: float, q: float, film: float,
     w_sup: float, w_sat: float, a_tot: float, m_cav: float,
@@ -617,7 +628,7 @@ def coupled_substep(
     def S(W):
         return a_tot * m_cav * (w_sup - W) + j_diff       # vents plus sealant diffusion
 
-    # --- quasi-steady humidity W* -------------------------------------
+    # --- quasi-steady humidity W*: where the air would settle -------------
     w_eq = _w_from_rh(des.rh_eq(q, t_air), t_air, p_atm)
     if not allow_desorption and w_eq > w_sup:
         w_eq = w_sup                     # cannot push air above supply without desorbing
@@ -639,47 +650,122 @@ def coupled_substep(
                 break
         w_star = 0.5 * (lo + hi)
 
-    condensed = 0.0
-    uptake = 0.0
-    vents = lambda W: a_tot * m_cav * (w_sup - W) * dt      # vent part of S, this substep
+    # --- relax the air toward W* at its real rate (2026-09-23) -------------
+    # The air does not jump to W*. Near any humidity W it moves as
+    #     m_cav dW/dt = S(W) - D(W),   rate  lam = (a.m_cav + dD/dW) / m_cav
+    # A hungry desiccant makes dD/dW huge (time constant of seconds), so the
+    # air reaches W* at once, as before. A full, tiny or (without desorption)
+    # clipped desiccant makes dD/dW ~ 0: the air then lags at the exchange
+    # rate for hours, exactly as in step_hour. Jumping to W* in that case
+    # skipped the lead-in before condensation and inflated fog after the
+    # desiccant filled (0.001 g gave 700 fog h/yr against 400 at 0 g).
+    # Exponential steps with the rate re-linearised each micro-step; the
+    # path is monotone toward W* and never crosses it.
+    def rate(W):
+        hW = max(1e-4 * W, 1e-9)
+        lo_w = max(W - hW, 0.0)
+        dD = (D(W + hW) - D(lo_w)) / (W + hW - lo_w)
+        return (a_tot * m_cav + max(dD, 0.0)) / m_cav
 
-    if w_star >= w_sat:
-        # pane condensing: air pinned at saturation
-        d = D(w_sat) * dt
-        supply = S(w_sat) * dt + max(0.0, inv0 - w_sat * m_cav)   # plus the air's own excess
-        uptake = d
-        condensed = max(0.0, supply - d)
-        w_new = w_sat
-        film += condensed
-        vent_net = vents(w_sat)
-    elif film > 0.0 and w_star < w_sat:
-        # film present: it feeds the air at saturation until gone
-        drain_rate = D(w_sat) - S(w_sat)                     # > 0 here
-        headroom = w_sat * m_cav - inv0
-        need = drain_rate * dt + headroom
-        if need <= film:
-            film -= need
-            uptake = D(w_sat) * dt
-            w_new = w_sat
-            vent_net = vents(w_sat)
-        else:
-            # film runs out part-way through the step: that fraction at
-            # saturation, the rest at W*. The last of the film goes to the
-            # air (headroom) and is then shared like any other water.
-            frac = film / need if need > 0 else 0.0
-            uptake = D(w_sat) * dt * frac + D(w_star) * dt * (1.0 - frac)
-            film = 0.0
-            w_new = w_star
-            vent_net = vents(w_sat) * frac + vents(w_star) * (1.0 - frac)
-    else:
-        # Uptake is rate-based. The air's own inventory change (W_0 -> W*)
-        # is ~0.005 g/m2 and belongs to the air, not the desiccant; booking
-        # it to the desiccant made loading drift down when supply air got
-        # wetter. Water balance closes to that inventory.
-        w_new = w_star
-        uptake = D(w_star) * dt
-        vent_net = vents(w_star)
+    def free(W, tau):
+        """Exponential step from W for tau hours, not past W* or the pane.
+        Returns (W_end, integral of W over the step, time used)."""
+        f = S(W) - D(W)
+        lam = rate(W)
+        if lam * tau < 1e-9:
+            w_end = W + f * tau / m_cav
+            if (w_end - w_star) * (W - w_star) < 0.0:
+                w_end = w_star
+            return w_end, 0.5 * (W + w_end) * tau, tau
+        target = W + f / (lam * m_cav)
+        if (target - w_star) * (W - w_star) < 0.0:
+            target = w_star                              # never overshoot the settling point
+        e = math.exp(-lam * tau)
+        w_end = target + (W - target) * e
+        if w_end > w_sat >= W and target > w_sat:
+            # reaches the pane's saturation part-way: stop there
+            t_hit = math.log((target - W) / (target - w_sat)) / lam
+            return w_sat, target * t_hit + (W - target) * (1.0 - math.exp(-lam * t_hit)) / lam, t_hit
+        return w_end, target * tau + (W - target) * (1.0 - e) / lam, tau
 
+    condensed = uptake = vent_net = 0.0
+    W = w_cav
+    if W > w_sat:
+        # supersaturation carried in (the pane just got colder) deposits at once
+        ex = (W - w_sat) * m_cav
+        film += ex
+        condensed += ex
+        W = w_sat
+    h = dt / RELAX_STEPS
+    for _ in range(RELAX_STEPS):
+        left = h
+        passes = 0
+        while left > 1e-12:
+            passes += 1
+            if film < FILM_ZERO_KG:
+                film = 0.0                               # a denormal film is no film (it once stalled this loop)
+            if passes > RELAX_MAX_PASSES:
+                # Safety net, never expected (RELAX_STATS counts it): finish
+                # the micro-step with one explicit step toward W*, water
+                # balance exact, anything above saturation onto the pane.
+                RELAX_STATS["safety_net"] += 1
+                w_end = W + (S(W) - D(W)) * left / m_cav
+                if (w_end - w_star) * (W - w_star) < 0.0:
+                    w_end = w_star
+                vn = a_tot * m_cav * (w_sup - 0.5 * (W + w_end)) * left
+                up = vn + j_diff * left - m_cav * (w_end - W)
+                if not allow_desorption and up < 0.0:
+                    up = 0.0
+                    w_end = W + (vn + j_diff * left) / m_cav
+                if w_end > w_sat:
+                    film += (w_end - w_sat) * m_cav
+                    condensed += (w_end - w_sat) * m_cav
+                    w_end = w_sat
+                vent_net += vn
+                uptake += up
+                W = w_end
+                break
+            if W < w_sat and film > 0.0:
+                # evaporation fast enough to fill the air's headroom (upper bound, as step_hour)
+                e_ = min(film, (w_sat - W) * m_cav)
+                film -= e_
+                W += e_ / m_cav
+            if W >= w_sat * (1.0 - 1e-12):
+                W = w_sat
+                f_sat = S(w_sat) - D(w_sat)
+                if f_sat >= 0.0:                         # pinned, condensing
+                    c = f_sat * left
+                    film += c
+                    condensed += c
+                    uptake += D(w_sat) * left
+                    vent_net += a_tot * m_cav * (w_sup - w_sat) * left
+                    left = 0.0
+                    continue
+                if film > 0.0:                           # pinned, film feeding the air
+                    need = -f_sat * left
+                    if need <= film:
+                        use = left
+                        film -= need
+                    else:
+                        use = left * film / need
+                        film = 0.0                       # used up exactly: never a leftover crumb
+                    uptake += D(w_sat) * use
+                    vent_net += a_tot * m_cav * (w_sup - w_sat) * use
+                    left -= use
+                    continue
+            # free relaxation (below saturation, or drying with no film)
+            w_end, int_w, used = free(W, left)
+            vn = a_tot * m_cav * (w_sup * used - int_w)
+            up = vn + j_diff * used - m_cav * (w_end - W)   # exact water balance of the step
+            if not allow_desorption and up < 0.0:
+                up = 0.0
+                w_end = W + (vn + j_diff * used) / m_cav
+            vent_net += vn
+            uptake += up
+            W = max(w_end, 0.0)                          # rounding can leave -1e-203
+            left -= used
+
+    w_new = W
     if m_des > 0.0:
         q = max(0.0, q + uptake / m_des)
     if film > film_cap:

@@ -44,6 +44,11 @@ def test_fill_time_matches_reference(weather, name, a_out, a_in, grams, tau, des
         absorptance=0.0, sky_radiation=False, pane_coupling=False, wind_scaling=False,
         ach_out=a_out, ach_in=a_in, desiccant_grams=grams, tau_hours=tau,
         allow_desorption=desorb, max_years=1,
+        # The reference has no sealant vapour diffusion; compare like with
+        # like (2026-09-23). With diffusion on, the 'sealed' case passed
+        # only because two errors cancelled: +2.5 % from the old solver
+        # dropping the cavity air's own water, -5 % from diffusion.
+        sealant_out="none", sealant_in="none",
     )
     eng = run_lifetime(inp, weather, None, keep_year1=False, keep_daily=False)
     ref = run_reference(

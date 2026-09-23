@@ -227,6 +227,16 @@ def test_offset_does_not_change_fill_time(w, inp):
     slight change in cavity air temperature and initial inventory."""
     g = inp.geometry
     deep = replace(inp, geometry=CavityGeometry(g.width_m, g.height_m, 3 * g.offset_m))
+    # Water trapped in the cavity air at sealing is real and, since
+    # 2026-09-23, conserved (the old solver discarded it whenever the air
+    # snapped to balance). A deeper cavity traps more; where that extra is a
+    # noticeable share of a gram-scale sieve, the deep cavity really does
+    # fill sooner (hypothesis: 6 g, sealed, 2 vs 6 in: 144 vs 30 h). The
+    # property holds only where the extra trapped water is small.
+    ta, tb = build_tables(inp, w, None), build_tables(deep, w, None)
+    cap = inp.desiccant_grams / 1000.0 / g.glazing_area_m2 * inp.full_fraction * inp.desiccant.q_max(25.0)
+    extra = tb.m_cav[0] * tb.w_supply[0] - ta.m_cav[0] * ta.w_supply[0]
+    assume(cap <= 0.0 or extra < 0.05 * cap)
     a = run_lifetime(inp, w, keep_year1=False, keep_daily=False)
     b = run_lifetime(deep, w, keep_year1=False, keep_daily=False)
     if a.exhausted_hour is not None and b.exhausted_hour is not None:
@@ -260,7 +270,17 @@ def test_sealed_cavity_only_has_its_own_water(w, inp):
     bead_g = sum(y.net_diffusion_g for y in r.years)
     n_years = len(r.years)
     bound_g = sum(r.tables.diff_kg_per_m2_h) * 1000.0 * area * n_years
-    slack = 0.05 * (initial_g + abs(bead_g)) + 1e-6
+    # The dry-air mass of the cavity is recomputed each hour from its
+    # temperature (a quasi-static air mass, as in cavity_moisture), so at a
+    # fixed humidity ratio the air's water changes at hour boundaries. Air
+    # can never hold more than saturation at the pane, which bounds the water
+    # this can add. Since 2026-09-23 the solver conserves water inside each
+    # step, so the desiccant can now take that trace (1 g sieve, 1 ft2,
+    # sealed: 0.0017 g phantom == 0.0017 g excess, to 6 decimals).
+    tb_ = r.tables
+    phantom_g = sum(max(0.0, tb_.m_cav[i] - tb_.m_cav[i - 1]) for i in range(1, tb_.n)) \
+        * max(tb_.w_sat_cold) * 1000.0 * area * n_years
+    slack = 0.05 * (initial_g + abs(bead_g)) + phantom_g + 1e-6
     assert r.total_water_into_desiccant_g <= initial_g + bead_g + slack
     assert bead_g <= bound_g * 1.10 + 1e-6      # 10 %: the bead flux is linearised in W
 
