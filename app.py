@@ -33,7 +33,7 @@ from engine.leakage import (
     EXISTING_PRESETS, RETROFIT_BY_KEY, RETROFIT_PRESETS, SEALANTS, air_leakage_from_ach,
     sealant_diffusion_kg_per_h,
 )
-from engine.lifetime import LifetimeInputs, LifetimeResult, run_lifetime
+from engine.lifetime import FOG_LEVELS, LifetimeInputs, LifetimeResult, run_lifetime
 from engine.report import workbook_bytes
 from engine.pressure import (
     CP_TABLE, DEFAULT_FLOOR_HEIGHT_M, DEFAULT_FLOORS, DEFAULT_LOOP_EXPONENT, DEFAULT_LOOP_K,
@@ -283,6 +283,9 @@ def _headline(r: LifetimeResult) -> dict:
         "exhausted_years": None if ex is None else round(ex / 8760.0, 3),
         "first_condensation_hour": fc,
         "first_condensation_days": None if fc is None else round(fc / 24.0, 1),
+        # Film above the visible threshold (visible_um), not just any liquid.
+        "first_visible_hour": r.first_visible_hour,
+        "first_visible_days": None if r.first_visible_hour is None else round(r.first_visible_hour / 24.0, 1),
         "hours_per_gram": None if r.hours_per_gram is None else round(r.hours_per_gram, 2),
         "years_run": r.years_run,
         "hours_run": r.hours_run,
@@ -448,9 +451,28 @@ def presets():
 @app.get("/api/lifetime")
 def lifetime():
     inp, echo = _parse_inputs()
+    # Opt-in (2026-09-23, 277 Park app): the hourly fog map and whole years
+    # simulated after the desiccant fills. Absent = original behaviour.
+    fog_map = _bool("fog_map", False)
+    years_after_full = _int("years_after_full", 0, 0, 5)
     location, weather, cached, poa = _weather(echo["address"], echo["orientation"])
-    r = run_lifetime(inp, weather, poa, keep_year1=True, keep_daily=True)
-    return jsonify(_result_payload(r, echo, location, weather, cached, trace=_bool("trace", True)))
+    r = run_lifetime(inp, weather, poa, keep_year1=True, keep_daily=True,
+                     keep_fog=fog_map, years_after_full=years_after_full)
+    payload = _result_payload(r, echo, location, weather, cached, trace=_bool("trace", True))
+    if fog_map:
+        payload["fog"] = {
+            # One entry per simulated year: a string of 8,760 digits in
+            # hour-of-year order, '0' = clear, '1'..'9' = visible fog
+            # intensity, log-spaced from visible_um to max_um; None for a
+            # year without a visible hour.
+            "years": r.fog_years,
+            "levels": FOG_LEVELS,
+            "scale": "log",
+            "visible_um": round(inp.visible_film_kg * 1000.0, 3),
+            "max_um": round(inp.max_film_kg * 1000.0, 3),
+            "years_after_full": years_after_full,
+        }
+    return jsonify(payload)
 
 
 def _axis(prefix: str) -> tuple[str, list[float]]:

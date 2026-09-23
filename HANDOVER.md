@@ -1,8 +1,29 @@
 # HANDOVER — Desiccant Lifetime Simulator (ANLY-003)
 
-Last session: 2026-09-15 (session 4). State: v0.5 (series pressure
+Last session: 2026-09-23 (session 5, fog map API). Before that 2026-09-15 (session 4). State: v0.5 (series pressure
 model + single-sided loops) pushed: main on GitHub at 2748f2b + the
 tab-consistency commit after it, Railway serves it.
+
+## Session 5 (2026-09-23): opt-in fog map for the 277 Park app
+
+- New sister app INOVUES-APPS/park277-desiccant (stakeholder-facing,
+  few controls) calls this API through its own server-side proxy.
+- /api/lifetime opt-in parameters, absent = original behaviour (tested):
+  fog_map=1 adds payload["fog"]: one string per simulated year of 8,760
+  digits, '0' clear, '1'..'9' visible-fog intensity log-spaced from
+  visible_um (5) to the retained-film cap (100 um), null for a year with
+  no visible hour. years_after_full=N (0..5) simulates N whole years
+  after the fill year. headline gains first_visible_hour/_days (film
+  above the visible threshold, not any liquid). tests/test_fog_map.py.
+- FINDING: the room parameters are t_in and rh_in. The Sep 16 study sent
+  rh_in_pct=30, which the API ignored: those runs used the 35 % default.
+- FINDING: with desorption on, a sieve near 99 % full holds the cavity at
+  its equilibrium RH (78 % at 0 degC, 91 % at 5 degC) and releases stored
+  water; VIG (f 0.014), wet-sealed both, 8 lb, 70 F / 30 %: full day 164,
+  886 h of thin visible film (5-7 um) in Feb-Mar of year 2. Desorption off
+  or no desiccant: none. Sensitive to the no-credit-below-25 degC capacity
+  cap: a few percent of real cold capacity would drop that RH to ~20 %.
+  Vendor isotherm at 0-10 degC would settle it.
 
 ## Session 4 (2026-09-15): the two layers were in parallel; now in series
 

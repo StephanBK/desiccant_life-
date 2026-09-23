@@ -366,6 +366,15 @@ class LifetimeResult:
     # First-year hourly trace for the animation.
     year1: dict[str, list[float]] = field(default_factory=dict)
     tables: HourTables | None = field(default=None, repr=False)
+    # First hour the film on the cold pane exceeds the VISIBLE threshold
+    # (first_condensation_hour counts any liquid at all, down to nanometres).
+    first_visible_hour: int | None = None
+    # Hour-by-hour fog map, one entry per simulated year, only when
+    # run_lifetime(keep_fog=True). Each entry is a string of 8,760 digits
+    # (hour of year order): '0' = no visible film, '1'..'9' = fog intensity,
+    # log-spaced from the visible threshold to the retained-film cap (see
+    # fog_level). None for a year with no visible hour, to keep payloads small.
+    fog_years: list[str | None] = field(default_factory=list)
 
     @property
     def exhausted_years(self) -> float | None:
@@ -740,6 +749,37 @@ def _w_from_rh(rh: float, t_c: float, p_atm: float) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Fog map encoding
+# ---------------------------------------------------------------------------
+
+#: Number of fog intensity levels in the hourly fog map (1..FOG_LEVELS).
+FOG_LEVELS = 9
+#: Floor for the log scale when the visible threshold is set to zero, kg/m2
+#: (1 nm of water). Only used to keep the logarithm finite.
+_FOG_LOG_FLOOR_KG = 1e-6
+
+
+def fog_level(film_kg: float, visible_kg: float, max_kg: float) -> int:
+    """Visible-fog intensity of one hour, 0..FOG_LEVELS.
+
+    0 when the film is at or below the visible threshold (the same test that
+    counts YearSummary.hours_visible, so the map and the counts agree).
+    Above it, levels 1..FOG_LEVELS are log-spaced between the threshold and
+    the retained-film cap, because the film spans two orders of magnitude
+    (5 um threshold to the 100 um cap) and a linear scale would put almost
+    every foggy hour in the lowest level."""
+    if film_kg <= visible_kg:
+        return 0
+    lo = max(visible_kg, _FOG_LOG_FLOOR_KG)
+    if max_kg <= lo or film_kg >= max_kg:
+        return FOG_LEVELS
+    if film_kg <= lo:
+        return 1
+    x = math.log(film_kg / lo) / math.log(max_kg / lo)
+    return max(1, min(FOG_LEVELS, 1 + int(x * FOG_LEVELS)))
+
+
+# ---------------------------------------------------------------------------
 # The solver
 # ---------------------------------------------------------------------------
 
@@ -750,9 +790,19 @@ def run_lifetime(
     tables: HourTables | None = None,
     keep_year1: bool = True,
     keep_daily: bool = True,
+    keep_fog: bool = False,
+    years_after_full: int = 0,
 ) -> LifetimeResult:
     """Play the TMY year on repeat until the desiccant is exhausted or
-    ``max_years`` is reached."""
+    ``max_years`` is reached.
+
+    ``keep_fog`` records the hourly fog map (LifetimeResult.fog_years).
+    ``years_after_full`` keeps simulating that many whole years after the
+    year the desiccant fills, so the aftermath (the first full winter with
+    a spent sieve) is simulated too. Both default to off, which reproduces
+    the original behaviour exactly."""
+    if not 0 <= years_after_full <= 5:
+        raise ValueError(f"years_after_full must be 0..5, got {years_after_full}")
     tb = tables if tables is not None else build_tables(inp, weather, poa_w_m2)
     n = tb.n
     des = inp.desiccant
@@ -773,7 +823,11 @@ def run_lifetime(
     q = 0.0
 
     exhausted_hour: int | None = None
+    full_year: int | None = None
     first_cond_hour: int | None = None
+    first_visible_hour: int | None = None
+    fog_years: list[str | None] = []
+    max_film = inp.max_film_kg
     years: list[YearSummary] = []
     total_uptake = 0.0
     run_out = run_in = run_diff = 0.0
@@ -789,8 +843,13 @@ def run_lifetime(
     }
 
     hours_run = 0
-    for year in range(inp.max_years):
+    for year in range(inp.max_years + years_after_full):
+        # Years beyond max_years are only the aftermath of a desiccant that
+        # filled; a run that never fills stops at max_years as before.
+        if year >= inp.max_years and exhausted_hour is None:
+            break
         y_cond = 0.0; y_hc = 0; y_hv = 0; y_up = 0.0; y_dp = 0.0
+        y_fog: list[str] | None = [] if keep_fog else None
         y_out = y_in = y_diff = 0.0
         h_out = h_in = h_diff = 0.0
         d_q = d_rh = d_dp = 0.0; d_pane = 1e9; d_film = 0.0; d_n = 0
@@ -841,6 +900,10 @@ def run_lifetime(
                     first_cond_hour = hours_run - 1
             if film > inp.visible_film_kg:
                 y_hv += 1
+                if first_visible_hour is None:
+                    first_visible_hour = hours_run - 1
+            if y_fog is not None:
+                y_fog.append(str(fog_level(film, inp.visible_film_kg, max_film)))
             # A fresh sieve drives W toward zero within hours. Dew point is
             # floored at -40 (same in degC and degF) for the charts; below
             # that the number carries no information.
@@ -871,6 +934,7 @@ def run_lifetime(
 
             if exhausted_hour is None and m_des > 0.0 and q >= q_full:
                 exhausted_hour = hours_run
+                full_year = year
                 life_out, life_in, life_diff = run_out + y_out, run_in + y_in, run_diff + y_diff
 
         years.append(YearSummary(
@@ -884,9 +948,12 @@ def run_lifetime(
             heating_diffusion_g=h_diff * 1000.0 * area,
         ))
         run_out += y_out; run_in += y_in; run_diff += y_diff
-        # Finish the year exhaustion falls in, so first condensation and
-        # the animation show the aftermath, then stop.
-        if exhausted_hour is not None:
+        if y_fog is not None:
+            fog_years.append("".join(y_fog) if y_hv > 0 else None)
+        # Finish the year exhaustion falls in (plus years_after_full whole
+        # years), so first condensation and the animation show the
+        # aftermath, then stop.
+        if exhausted_hour is not None and year >= full_year + years_after_full:
             break
 
     if life_out is None:
@@ -909,4 +976,5 @@ def run_lifetime(
         daily_pane_min_c=daily_pane, daily_film_max_kg=daily_film,
         daily_t_out_c=daily_to, daily_rh_out=daily_rho, daily_cond_g=daily_cg,
         year1=year1 if keep_year1 else {}, tables=tb,
+        first_visible_hour=first_visible_hour, fog_years=fog_years,
     )
