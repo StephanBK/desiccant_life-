@@ -378,6 +378,12 @@ class LifetimeResult:
     # log-spaced from the visible threshold to the retained-film cap (see
     # fog_level). None for a year with no visible hour, to keep payloads small.
     fog_years: list[str | None] = field(default_factory=list)
+    # Year-boundary snapshots, only with run_lifetime(keep_boundaries=True):
+    # one dict per year end with the state at the end of that year, the
+    # state the next year starts from ("next_start"), and the pane film over
+    # the last 24 h ("tail_film") and the next year's first 24 h
+    # ("head_film"). For the continuity guard in tests/test_boundaries.py.
+    boundaries: list[dict] = field(default_factory=list)
 
     @property
     def exhausted_years(self) -> float | None:
@@ -529,7 +535,13 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
         # humidity; the stream temperature and vent rise above already
         # include the through-flow, which dominates by orders of magnitude.
         f_out, f_in = breathing_split(inp.al_out, inp.al_in)
+        # Hermetic on both sides: no path, so no breathing (the cavity's
+        # pressure moves instead). Before 2026-09-23 the flow was still added
+        # to the total and so landed entirely on the room side.
+        hermetic = f_out + f_in <= 0.0
         for i in range(n):
+            if hermetic:
+                break
             b = breathing_ach(t_air_l[i - 1], t_air_l[i])
             if b <= 0.0:
                 continue
@@ -881,6 +893,7 @@ def run_lifetime(
     keep_daily: bool = True,
     keep_fog: bool = False,
     years_after_full: int = 0,
+    keep_boundaries: bool = False,
 ) -> LifetimeResult:
     """Play the TMY year on repeat until the desiccant is exhausted or
     ``max_years`` is reached.
@@ -916,6 +929,7 @@ def run_lifetime(
     first_cond_hour: int | None = None
     first_visible_hour: int | None = None
     fog_years: list[str | None] = []
+    boundaries: list[dict] = []
     max_film = inp.max_film_kg
     years: list[YearSummary] = []
     total_uptake = 0.0
@@ -937,6 +951,11 @@ def run_lifetime(
         # filled; a run that never fills stops at max_years as before.
         if year >= inp.max_years and exhausted_hour is None:
             break
+        if keep_boundaries:
+            if boundaries:
+                boundaries[-1]["next_start"] = {"film": film, "w_cav": w_cav, "q": q}
+            tail_film: list[float] = []
+            head_film: list[float] = []
         y_cond = 0.0; y_hc = 0; y_hv = 0; y_up = 0.0; y_dp = 0.0
         y_dv = 0; day_vis = False
         y_fog: list[str] | None = [] if keep_fog else None
@@ -999,6 +1018,11 @@ def run_lifetime(
                 if day_vis:
                     y_dv += 1
                 day_vis = False
+            if keep_boundaries:
+                if i >= n - 24:
+                    tail_film.append(film)
+                if year > 0 and i < 24:
+                    head_film.append(film)
             # A fresh sieve drives W toward zero within hours. Dew point is
             # floored at -40 (same in degC and degF) for the charts; below
             # that the number carries no information.
@@ -1045,6 +1069,10 @@ def run_lifetime(
         run_out += y_out; run_in += y_in; run_diff += y_diff
         if y_fog is not None:
             fog_years.append("".join(y_fog) if y_hv > 0 else None)
+        if keep_boundaries:
+            if boundaries:
+                boundaries[-1]["head_film"] = head_film
+            boundaries.append({"year": year + 1, "end": {"film": film, "w_cav": w_cav, "q": q}, "tail_film": tail_film})
         # Finish the year exhaustion falls in (plus years_after_full whole
         # years), so first condensation and the animation show the
         # aftermath, then stop.
@@ -1071,5 +1099,5 @@ def run_lifetime(
         daily_pane_min_c=daily_pane, daily_film_max_kg=daily_film,
         daily_t_out_c=daily_to, daily_rh_out=daily_rho, daily_cond_g=daily_cg,
         year1=year1 if keep_year1 else {}, tables=tb,
-        first_visible_hour=first_visible_hour, fog_years=fog_years,
+        first_visible_hour=first_visible_hour, fog_years=fog_years, boundaries=boundaries,
     )

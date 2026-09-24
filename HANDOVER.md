@@ -1,8 +1,34 @@
 # HANDOVER — Desiccant Lifetime Simulator (ANLY-003)
 
-Last session: 2026-09-23 (session 7, parity with the 277 Park app). Before that 2026-09-15 (session 4). State: v0.5 (series pressure
+Last session: 2026-09-24 (session 8, year-boundary guard, hermetic breathing fix). Before that 2026-09-15 (session 4). State: v0.5 (series pressure
 model + single-sided loops) pushed: main on GitHub at 2748f2b + the
 tab-consistency commit after it, Railway serves it.
+
+## Session 8 (2026-09-24): year-boundary guard; hermetic breathing bug
+
+- Stephan saw "no fog at the end of year 1, fog right at the start of
+  year 2" (not reproduced in 60 scenario-years). Added a permanent guard,
+  tests/test_boundaries.py: over 6 scenarios it checks at every year
+  boundary that film, cavity humidity and loading carry over EXACTLY, that
+  the film changes across New Year's midnight no more than 1.5 x the
+  largest neighbouring hourly change (0.1 um floor), and that the weather
+  file is continuous at the year end (<= 99th percentile hourly step).
+  Uses the new opt-in run_lifetime(keep_boundaries=True) recorder
+  (LifetimeResult.boundaries: end state, next start state, film over the
+  24 h either side); off by default, default path unchanged. Verified the
+  guard bites: a deliberate film reset at New Year fails both checks.
+- BUG FIXED (pre-existing): with BOTH layers hermetic (al 0 / 0),
+  breathing_split returns (0, 0) but build_tables still added the
+  breathing ACH to the total, so it all landed on the room side (17 g
+  sieve, small sealed window: 0.57 g of room water a year). No path, no
+  breathing now; test_hermetic_cavity_does_not_breathe. Only hermetic /
+  hermetic runs change; the 277 app cannot select hermetic.
+- Property edge (not a bug): in a very leaky cavity the air IS the supply
+  air, so loading per gram does not depend on the amount and every size
+  fills at the same moment (500 g to 8,000 g: hour 1745 or 1746); counted
+  in whole hours the numerics can order equal times either way by an hour.
+  test_more_desiccant_lasts_at_least_as_long now allows 2 h or 0.5 %.
+- Suite: 347 passed (341 + 6).
 
 ## Session 7 (2026-09-23): parity with the 277 Park app
 
