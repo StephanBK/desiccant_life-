@@ -55,7 +55,9 @@ app = Flask(__name__, static_folder=DIST, static_url_path="")
 # wet-sealed then a wet-sealed retrofit, both at the E283 detection floor,
 # silicone bead diffusion as the vapour floor. See engine/leakage.py.
 DEFAULTS = {
-    "address": "277 Park Avenue, New York, NY",
+    # With the ZIP: without it the geocoder picks 277 Park Avenue in BROOKLYN
+    # (11205), 7 km away (found 2026-09-23 via the 277 Park app).
+    "address": "277 Park Avenue, New York, NY 10172",
     "width_in": 60.0, "height_in": 96.0, "offset_in": 0.6,
     "f_cold": 0.30, "u_ip": 0.30, "r_ip": 0.97,
     "t_in_f": 70.0, "rh_in_pct": 35.0,
@@ -283,6 +285,10 @@ def _headline(r: LifetimeResult) -> dict:
         "exhausted_years": None if ex is None else round(ex / 8760.0, 3),
         "first_condensation_hour": fc,
         "first_condensation_days": None if fc is None else round(fc / 24.0, 1),
+        # Days with visible fog in the LAST simulated year (the 277 Park app's
+        # "fog days per year"; with years_after_full=1 that is the first whole
+        # year after the desiccant fills).
+        "fog_days_per_year": r.years[-1].days_visible if r.years else 0,
         # Film above the visible threshold (visible_um), not just any liquid.
         "first_visible_hour": r.first_visible_hour,
         "first_visible_days": None if r.first_visible_hour is None else round(r.first_visible_hour / 24.0, 1),
@@ -501,6 +507,7 @@ def _axis(prefix: str) -> tuple[str, list[float]]:
 def sweep():
     inp, echo = _parse_inputs()
     inp = replace(inp, max_years=min(inp.max_years, _int("sweep_max_years", 5, 1, 20)))
+    after = _int("years_after_full", 0, 0, 5)
     location, weather, cached, poa = _weather(echo["address"], echo["orientation"])
     kx, vx, ux = _axis("x")
     if request.args.get("y_key"):
@@ -509,12 +516,12 @@ def sweep():
             raise BadRequest("x_key and y_key must differ")
         if len(vx) * len(vy) > 400:
             raise BadRequest("grid too large; keep x * y <= 400 points")
-        grid = sweep_2d(inp, weather, kx, vx, ky, vy, poa)
+        grid = sweep_2d(inp, weather, kx, vx, ky, vy, poa, years_after_full=after)
         rows = [[_sp(p, ux[ix], uy[iy]) for ix, p in enumerate(row)] for iy, row in enumerate(grid)]
         return jsonify({"mode": "2d", "inputs": echo, "x_key": kx, "y_key": ky,
                         "x_values": ux, "y_values": uy, "grid": rows,
                         "sweep_max_years": inp.max_years})
-    pts = sweep_1d(inp, weather, kx, vx, poa)
+    pts = sweep_1d(inp, weather, kx, vx, poa, years_after_full=after)
     return jsonify({"mode": "1d", "inputs": echo, "x_key": kx, "x_values": ux,
                     "points": [_sp(p, ux[i], None) for i, p in enumerate(pts)],
                     "sweep_max_years": inp.max_years})
@@ -527,6 +534,9 @@ def _sp(p, x_user, y_user) -> dict:
         "exhausted_days": None if p.exhausted_hour is None else round(p.exhausted_hour / 24.0, 1),
         "first_condensation_hour": p.first_condensation_hour,
         "first_condensation_days": None if p.first_condensation_hour is None else round(p.first_condensation_hour / 24.0, 1),
+        "first_visible_hour": p.first_visible_hour,
+        "first_visible_days": None if p.first_visible_hour is None else round(p.first_visible_hour / 24.0, 1),
+        "fog_days_per_year": p.fog_days_per_year,
         "hours_per_gram": None if p.hours_per_gram is None else round(p.hours_per_gram, 2),
         "total_water_g": round(p.total_water_g, 2),
         "years_run": p.years_run,
@@ -537,7 +547,8 @@ def _sp(p, x_user, y_user) -> dict:
 def export_xlsx():
     inp, echo = _parse_inputs()
     location, weather, cached, poa = _weather(echo["address"], echo["orientation"])
-    r = run_lifetime(inp, weather, poa, keep_year1=True, keep_daily=True)
+    r = run_lifetime(inp, weather, poa, keep_year1=True, keep_daily=True,
+                     years_after_full=_int("years_after_full", 0, 0, 5))
     data = workbook_bytes(r, echo, _headline(r), weather.describe(), ASSUMPTIONS)
     name = f"desiccant_life_{int(inp.desiccant_grams)}g.xlsx"
     return Response(data, mimetype=XLSX_MIME,

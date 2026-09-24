@@ -83,7 +83,7 @@ export default function Cinema({ result, active }) {
   const h = result.headline, inp = result.inputs, qmax = result.q_max_25 || 0.21
   const load = Math.min(1, (daily.loading[day] || 0) / qmax)
   const fullDay = h.exhausted_hour !== null ? Math.floor(h.exhausted_hour / 24) : null
-  const fogDay = h.first_condensation_hour !== null ? Math.floor(h.first_condensation_hour / 24) : null
+  const fogDay = h.first_visible_hour !== null ? Math.floor(h.first_visible_hour / 24) : null   // visible film, as in the 277 app
   const isFull = fullDay !== null && day >= fullDay
   const fogNow = fogDay !== null && day >= fogDay && day < fogDay + 3
   const fogged = fogDay !== null && day >= fogDay
@@ -146,7 +146,7 @@ export default function Cinema({ result, active }) {
         <div className="cin-side">
           <div className="cin-kv"><span>sieve holds cavity air at</span><b>{rhEq.toFixed(rhEq < 1 ? 2 : 0)} % RH</b><small>rises as it fills; protection fades before "full"</small></div>
           <div className={`cin-milestone${isFull ? ' hit' : ''}`}><span>full</span><b>{fullDay !== null ? `day ${fullDay + 1}` : `> ${h.years_run} yr`}</b><small>{h.exhausted_hour !== null ? `${fmt.n(h.exhausted_hour)} h · ${fmt.n(h.hours_per_gram, 2)} h per gram` : 'not within run'}</small></div>
-          <div className={`cin-milestone fog${fogged ? ' hit' : ''}`}><span>first fog</span><b>{fogDay !== null ? `day ${fogDay + 1}` : 'none'}</b><small>{fogDay !== null ? dayLabel(fogDay).date + `, year ${dayLabel(fogDay).year}` : `no condensation in ${h.years_run} yr`}</small></div>
+          <div className={`cin-milestone fog${fogged ? ' hit' : ''}`}><span>first fog</span><b>{fogDay !== null ? `day ${fogDay + 1}` : 'none'}</b><small>{fogDay !== null ? dayLabel(fogDay).date + `, year ${dayLabel(fogDay).year}` : `no visible fog in ${h.years_run} yr`}</small></div>
           <div className="cin-kv"><span>{fmt.n(inp.grams)} g of {inp.desiccant === 'ms3a' ? '3A molecular sieve' : inp.desiccant}</span><b>{fmt.n(inp.capacity_g, 1)} g</b><small>water it can hold</small></div>
         </div>
 

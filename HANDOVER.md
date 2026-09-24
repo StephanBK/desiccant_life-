@@ -1,8 +1,44 @@
 # HANDOVER — Desiccant Lifetime Simulator (ANLY-003)
 
-Last session: 2026-09-23 (session 6, air relaxation fix). Before that 2026-09-15 (session 4). State: v0.5 (series pressure
+Last session: 2026-09-23 (session 7, parity with the 277 Park app). Before that 2026-09-15 (session 4). State: v0.5 (series pressure
 model + single-sided loops) pushed: main on GitHub at 2748f2b + the
 tab-consistency commit after it, Railway serves it.
+
+## Session 7 (2026-09-23): parity with the 277 Park app
+
+- Stephan: the old simulator (this app, embedded in Odoo) and the 277 Park
+  app (StephanBK/park277-desiccant) share the engine but showed different
+  results. PROVEN on the live API: identical inputs give byte-identical
+  headline, years and fog map. The differences were the old app's own:
+  (1) starting inputs (address without ZIP geocoded to 277 Park Avenue,
+  BROOKLYN 11205; south facade; f 0.30 / U 0.30; RH 35 %; floors 10/5;
+  1,000 g; desorption off), (2) runs stopped in the fill year, so the
+  winter after saturation was never simulated, (3) "first fog" meant the
+  first trace of liquid (hour 0 for the 277 default), not visible fog.
+- FIX: first-load inputs moved to frontend/src/defaults.json and set to the
+  277 default (VIG f 0.014, U 0.16, north, floor 25 of 50, 3,628.739 g =
+  8 lb, 70 F / 30 %, desorption on, years_after_full 1). API default
+  address now has the ZIP. "First fog" everywhere (Simulate card, chart
+  marker, Cinema, Sweep) = first VISIBLE fog; first trace of liquid kept on
+  Explain. New card and headline field fog_days_per_year = days with visible
+  fog in the last simulated year (YearSummary.days_visible), the 277 app's
+  definition. Sweep and Excel export accept years_after_full; sweep points
+  carry first_visible_hour and fog_days_per_year.
+- tests/test_parity.py (7): fog-day counting, headline field, sweep and
+  export, ZIP default, defaults.json == the 277 request, and the old app's
+  first-load request gives identical results to the 277 app's. The 277 repo
+  pins the same request from its side (test/engine.test.js "parity").
+- Anomalies Stephan reported, investigated (no engine change): fog in May
+  and June at high room RH in tight cavities is the WINTER FILM DRYING
+  (wet seals trap it; cavity air holds ~0.4 g/m2), single-film model puts
+  it on the old pane where in summer it would move to the colder retrofit
+  glass; isolated spring-night fog with leaky outer seals is radiative dew
+  (pane ~7 F below outdoor air on clear nights). "No fog end of year 1,
+  fog right at the start of year 2" NOT reproduced (60 scenario-years,
+  TMY continuous at the boundary, state carried): waiting for the exact
+  scenario link.
+- Next (Stephan chose "both"): one front end later (277 app plus an
+  Advanced mode with this app's inputs), so the two cannot drift.
 
 ## Session 6 (2026-09-23): air relaxation fix (post-saturation fog was inflated)
 

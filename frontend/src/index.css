@@ -113,11 +113,12 @@ button { cursor: pointer; }
 
 /* -------------------------------------------------------------- content */
 .content { padding: 22px 26px 60px; min-width: 0; }
-.headline { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; position: relative; }
+.headline { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; position: relative; }
 .unit-row { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 8px; }
 .unit-toggle { display: flex; gap: 4px; }
 .unit-toggle .btn[aria-pressed="true"] { border-color: var(--glass); color: var(--glass); background: var(--glass-2); }
 
+@media (max-width: 1100px) { .headline { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .headline { grid-template-columns: 1fr; } }
 .stat {
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);

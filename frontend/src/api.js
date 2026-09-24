@@ -1,23 +1,14 @@
 // Thin client for the Flask API. Inputs live in one flat object in the UI
 // and are sent as a query string, so a run is also a shareable URL.
 
-export const DEFAULT_INPUTS = {
-  address: '277 Park Avenue, New York, NY',
-  orientation: 'south',
-  width_in: 60, height_in: 96, offset_in: 0.6,
-  f_cold: 0.30, u_ip: 0.30, r_ip: 0.97, f_warm: '',
-  t_in: 70, rh_in: 35,
-  al_out: 'wet_sealed', al_in: 'wet_sealed', dp_pa: 3,
-  p_occ_pa: 5, p_unocc_pa: 0, occ_start_h: 7, occ_end_h: 19, weekdays_only: true,
-  floors: 10, window_floor: 5, floor_height_ft: 11.81, series_model: true, breathing: true,
-  loops: true, loop_k: 0.75, loop_n: 0.65,
-  sealant_out: 'silicone', sealant_in: 'silicone', bead_width_in: 0.25, bead_depth_in: 0.25,
-  wind_scaling: true,
-  grams: 1000, desiccant: 'ms3a', tau_h: '',
-  desorption: false, full_fraction: 0.95,
-  pane_coupling: true, absorptance: 0.10, sky_radiation: true,
-  max_years: 20, visible_um: 5,
-}
+// First-load inputs live in defaults.json so the engine's parity test
+// (tests/test_parity.py) can read the very same file. Since 2026-09-23 they
+// equal the 277 Park app's default scenario: VIG, both layers wet-sealed,
+// 8 lb (3,628.739 g), 70 F / 30 %, north facade, floor 25 of 50, desorption
+// on, one whole year simulated after the desiccant fills.
+import DEFAULTS from './defaults.json'
+
+export const DEFAULT_INPUTS = DEFAULTS
 
 export function toQuery(inp, extra = {}) {
   const p = new URLSearchParams()

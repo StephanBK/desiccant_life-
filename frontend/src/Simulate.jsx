@@ -32,7 +32,10 @@ function Stat({ cls, value, unit, label, sub, tip }) {
 function Headline({ h, inputs, unit, setUnit }) {
   const div = unit === 'years' ? 8760 : 730.5
   const show = (hours) => hours === null ? null : fmt.n(hours / div, hours / div < 10 ? 2 : 1)
-  const ex = show(h.exhausted_hour), fc = show(h.first_condensation_hour)
+  // 'First fog' = first VISIBLE film (5 um), as in the 277 Park app (2026-09-23);
+  // the first trace of liquid is kept on the Explain tab.
+  const ex = show(h.exhausted_hour), fc = show(h.first_visible_hour)
+  const fogDays = h.fog_days_per_year ?? 0
   return (
     <>
     <div className="unit-row"><span className="hint">Show durations in</span><div className="unit-toggle" role="group" aria-label="Time unit">
@@ -47,8 +50,13 @@ function Headline({ h, inputs, unit, setUnit }) {
       <Stat cls="fog" tip="out_fog"
         value={fc ?? 'none'}
         unit={fc ? unit : ''}
-        label="until the pane first fogs"
-        sub={fc ? `hour ${fmt.n(h.first_condensation_hour)} (${fmt.n(h.first_condensation_hour / 24, 1)} days), ${fmt.clock(h.first_condensation_hour)}` : `no condensation in ${h.years_run} year${h.years_run > 1 ? 's' : ''}`} />
+        label="until the pane first fogs (visible film)"
+        sub={fc ? `hour ${fmt.n(h.first_visible_hour)} (${fmt.n(h.first_visible_hour / 24, 1)} days), ${fmt.clock(h.first_visible_hour % 8760)}, year ${Math.floor(h.first_visible_hour / 8760) + 1}` : `no visible fog in ${h.years_run} year${h.years_run > 1 ? 's' : ''}`} />
+      <Stat cls="fog" tip="out_fogdays"
+        value={fmt.n(fogDays)}
+        unit={fogDays === 1 ? 'day' : 'days'}
+        label={h.exhausted_hour !== null ? 'with fog per year once full' : 'with fog per year'}
+        sub={`year ${h.years_run}${h.exhausted_hour !== null ? ', the first full year after the desiccant fills' : ''}`} />
       <Stat cls="glass" tip="out_hpg"
         value={h.hours_per_gram !== null ? fmt.n(h.hours_per_gram, h.hours_per_gram < 10 ? 2 : 0) : '—'}
         unit={h.hours_per_gram !== null ? 'h / g' : ''}
@@ -166,7 +174,7 @@ function LongChart({ daily, headline }) {
     d: i + 1, load: +(100 * q / 0.21).toFixed(2), rh: daily.rh_eq_pct[i], dew: daily.cavity_dew_f[i], pane: daily.pane_min_f[i], film: daily.film_um[i],
   }))
   const exDay = headline.exhausted_hour !== null ? headline.exhausted_hour / 24 : null
-  const fcDay = headline.first_condensation_hour !== null ? headline.first_condensation_hour / 24 : null
+  const fcDay = headline.first_visible_hour !== null ? headline.first_visible_hour / 24 : null
   return (
     <div className="card">
       <h2>The whole run, day by day</h2>

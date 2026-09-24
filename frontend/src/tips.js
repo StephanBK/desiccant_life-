@@ -211,9 +211,14 @@ export const TIPS = {
     src: 'Engine: engine/lifetime.py run_lifetime. Cross-checked against an independent model within 2.5 % (AUDIT §2).',
   },
   out_fog: {
-    what: 'First hour in which any water condenses on the existing pane\'s cavity face.',
-    how: 'Condensation when the quasi-steady cavity humidity exceeds W_sat(T_cold). Depends on sky cooling and room RH far more than on the desiccant.',
-    src: 'Model output; "none" means no condensing hour within the years run.',
+    what: 'First hour in which the water film on the existing pane\'s cavity face is VISIBLE (thicker than 5 um), counted from installation on January 1.',
+    how: 'Same definition as the 277 Park app. The first trace of liquid (often hour 0, a few nanometres) is on the Explain tab. Depends on sky cooling and room RH far more than on the desiccant.',
+    src: 'Model output; the run continues one whole year after the desiccant fills, so the winter after saturation is included.',
+  },
+  out_fogdays: {
+    what: 'Days with at least one hour of visible fog, in the last simulated year (the first whole year after the desiccant fills).',
+    how: 'Same definition and year as the 277 Park app\'s fog-days box (all hours).',
+    src: 'Model output (engine headline fog_days_per_year).',
   },
   out_hpg: {
     what: 'Hours of protection per gram of desiccant: fill hours / grams.',

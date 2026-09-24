@@ -1,0 +1,18 @@
+{
+  "address": "277 Park Avenue, New York, NY 10172",
+  "orientation": "north",
+  "width_in": 60, "height_in": 96, "offset_in": 0.6,
+  "f_cold": 0.014, "u_ip": 0.16, "r_ip": 0.97, "f_warm": "",
+  "t_in": 70, "rh_in": 30,
+  "al_out": "wet_sealed", "al_in": "wet_sealed", "dp_pa": 3,
+  "p_occ_pa": 5, "p_unocc_pa": 0, "occ_start_h": 7, "occ_end_h": 19, "weekdays_only": true,
+  "floors": 50, "window_floor": 25, "floor_height_ft": 11.81, "series_model": true, "breathing": true,
+  "loops": true, "loop_k": 0.75, "loop_n": 0.65,
+  "sealant_out": "silicone", "sealant_in": "silicone", "bead_width_in": 0.25, "bead_depth_in": 0.25,
+  "wind_scaling": true,
+  "grams": 3628.739, "desiccant": "ms3a", "tau_h": "",
+  "desorption": true, "full_fraction": 0.95,
+  "pane_coupling": true, "absorptance": 0.1, "sky_radiation": true,
+  "max_years": 20, "visible_um": 5,
+  "years_after_full": 1
+}

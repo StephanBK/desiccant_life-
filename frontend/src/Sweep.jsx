@@ -77,7 +77,7 @@ function Heat({ res }) {
               const bg = colorFor(d, dmin, dmax)
               const dark = d === null || (d > (dmin + dmax) / 4)
               return <div key={`${ix}-${iy}`} className="cell" style={{ background: bg, color: dark ? '#fff' : '#16233a' }}
-                title={`${mx.label} ${p.x} ${mx.unit}, ${my.label} ${p.y} ${my.unit}: ${d === null ? 'not exhausted' : `${fmt.n(p.exhausted_hour)} h`}; first fog ${p.first_condensation_days ?? 'none'} d; ${p.hours_per_gram ?? '—'} h/g`}>{label(d, p)}</div>
+                title={`${mx.label} ${p.x} ${mx.unit}, ${my.label} ${p.y} ${my.unit}: ${d === null ? 'not exhausted' : `${fmt.n(p.exhausted_hour)} h`}; first visible fog ${p.first_visible_days ?? 'none'} d; ${p.fog_days_per_year} fog days/yr; ${p.hours_per_gram ?? '—'} h/g`}>{label(d, p)}</div>
             }),
           ]
         })}
@@ -91,7 +91,7 @@ function Heat({ res }) {
 
 function Line1D({ res }) {
   const mx = AXES[res.x_key]
-  const data = res.points.map((p) => ({ x: p.x, full: days(p.exhausted_hour), fog: days(p.first_condensation_hour), hpg: p.hours_per_gram }))
+  const data = res.points.map((p) => ({ x: p.x, full: days(p.exhausted_hour), fog: days(p.first_visible_hour), hpg: p.hours_per_gram }))
   return (
     <ResponsiveContainer width="100%" height={320}>
       <LineChart data={data} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>

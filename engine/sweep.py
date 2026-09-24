@@ -71,6 +71,10 @@ class SweepPoint:
     hours_per_gram: float | None
     total_water_g: float
     years_run: int
+    # 2026-09-23, same definitions as the 277 Park app: first VISIBLE fog,
+    # and days with visible fog in the last simulated year.
+    first_visible_hour: int | None = None
+    fog_days_per_year: int = 0
 
 
 def sweep_1d(
@@ -79,6 +83,7 @@ def sweep_1d(
     key: str,
     values: list[float],
     poa_w_m2: list[float] | None = None,
+    years_after_full: int = 0,
 ) -> list[SweepPoint]:
     """One run per value of ``key``."""
     if not values:
@@ -90,7 +95,7 @@ def sweep_1d(
         shared = build_tables(inp, weather, poa_w_m2)
     out: list[SweepPoint] = []
     for v in values:
-        r = _run(_with(inp, key, v), weather, poa_w_m2, shared)
+        r = _run(_with(inp, key, v), weather, poa_w_m2, shared, years_after_full)
         out.append(_point(v, None, r))
     return out
 
@@ -103,6 +108,7 @@ def sweep_2d(
     key_y: str,
     values_y: list[float],
     poa_w_m2: list[float] | None = None,
+    years_after_full: int = 0,
 ) -> list[list[SweepPoint]]:
     """Grid indexed [iy][ix]. Tables are rebuilt only when an axis that
     touches them changes, and only along the outer loop."""
@@ -121,14 +127,15 @@ def sweep_2d(
         shared = None if x_tables else build_tables(row_inp, weather, poa_w_m2)
         row: list[SweepPoint] = []
         for vx in values_x:
-            r = _run(_with(row_inp, key_x, vx), weather, poa_w_m2, shared)
+            r = _run(_with(row_inp, key_x, vx), weather, poa_w_m2, shared, years_after_full)
             row.append(_point(vx, vy, r))
         grid.append(row)
     return grid
 
 
-def _run(inp, weather, poa, tables) -> LifetimeResult:
-    return run_lifetime(inp, weather, poa, tables=tables, keep_year1=False, keep_daily=False)
+def _run(inp, weather, poa, tables, years_after_full: int = 0) -> LifetimeResult:
+    return run_lifetime(inp, weather, poa, tables=tables, keep_year1=False, keep_daily=False,
+                        years_after_full=years_after_full)
 
 
 def _point(x, y, r: LifetimeResult) -> SweepPoint:
@@ -137,4 +144,6 @@ def _point(x, y, r: LifetimeResult) -> SweepPoint:
         first_condensation_hour=r.first_condensation_hour,
         hours_per_gram=r.hours_per_gram, total_water_g=r.total_water_into_desiccant_g,
         years_run=r.years_run,
+        first_visible_hour=r.first_visible_hour,
+        fog_days_per_year=r.years[-1].days_visible if r.years else 0,
     )

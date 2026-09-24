@@ -318,6 +318,9 @@ class YearSummary:
     heating_outdoor_g: float = 0.0
     heating_room_g: float = 0.0
     heating_diffusion_g: float = 0.0
+    # Days with at least one hour of visible film (2026-09-23; the "fog
+    # days" of the 277 Park app, same definition).
+    days_visible: int = 0
 
 
 HEATING_SEASON_HOURS = 2160          # Jan 1 .. Mar 31 = 90 days
@@ -935,6 +938,7 @@ def run_lifetime(
         if year >= inp.max_years and exhausted_hour is None:
             break
         y_cond = 0.0; y_hc = 0; y_hv = 0; y_up = 0.0; y_dp = 0.0
+        y_dv = 0; day_vis = False
         y_fog: list[str] | None = [] if keep_fog else None
         y_out = y_in = y_diff = 0.0
         h_out = h_in = h_diff = 0.0
@@ -986,10 +990,15 @@ def run_lifetime(
                     first_cond_hour = hours_run - 1
             if film > inp.visible_film_kg:
                 y_hv += 1
+                day_vis = True
                 if first_visible_hour is None:
                     first_visible_hour = hours_run - 1
             if y_fog is not None:
                 y_fog.append(str(fog_level(film, inp.visible_film_kg, max_film)))
+            if i % 24 == 23:                     # close the day: any visible hour makes a fog day
+                if day_vis:
+                    y_dv += 1
+                day_vis = False
             # A fresh sieve drives W toward zero within hours. Dew point is
             # floored at -40 (same in degC and degF) for the charts; below
             # that the number carries no information.
@@ -1025,7 +1034,7 @@ def run_lifetime(
 
         years.append(YearSummary(
             year=year + 1, condensed_kg_per_m2=y_cond, hours_condensing=y_hc,
-            hours_visible=y_hv, water_into_desiccant_g=y_up * 1000.0 * area,
+            hours_visible=y_hv, days_visible=y_dv, water_into_desiccant_g=y_up * 1000.0 * area,
             loading_end=q, rh_eq_end=des.rh_eq(q, 21.0) if m_des > 0 else 1.0,
             mean_cavity_dew_point_c=y_dp / n,
             net_outdoor_g=y_out * 1000.0 * area, net_room_g=y_in * 1000.0 * area,

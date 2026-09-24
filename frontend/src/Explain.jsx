@@ -198,7 +198,7 @@ export default function Explain({ result, presets, inp }) {
         <Step title="6. End of life and hours per gram" figure={<FigLife h={h} />}>
           <p>Two numbers. The sieve is called full at 95 % of its 25 °C capacity, because a Langmuir curve reaches 100 % only asymptotically; at 35 % room RH its equilibrium is 96.7 %, so thresholds above that would never fire. First fog is the first hour any water condenses on the pane; it can come before or after full, depending on how cold the pane runs.</p>
           <div className="formula">{`exhausted_hour = first hour q ≥ 0.95 · q_max(25 °C)\nhours_per_gram = exhausted_hour / grams\ngrams for one year ≈ 8760 / hours_per_gram`}</div>
-          {h && <Live rows={[['Full after', h.exhausted_hour === null ? 'not within run' : `${fmt.n(h.exhausted_hour)} h`], ['First fog', h.first_condensation_hour === null ? 'none' : `${fmt.n(h.first_condensation_hour)} h`], ['Hours per gram', h.hours_per_gram ?? '—']]} />}
+          {h && <Live rows={[['Full after', h.exhausted_hour === null ? 'not within run' : `${fmt.n(h.exhausted_hour)} h`], ['First visible fog', h.first_visible_hour === null ? 'none' : `${fmt.n(h.first_visible_hour)} h`], ['First trace of liquid', h.first_condensation_hour === null ? 'none' : `${fmt.n(h.first_condensation_hour)} h`], ['Fog days per year (last year)', `${h.fog_days_per_year ?? 0}`], ['Hours per gram', h.hours_per_gram ?? '—']]} />}
         </Step>
 
         <Step title="7. Where the water comes from" figure={<FigSources c={result?.contributions ? scaleWindow(result.contributions.life, result.contributions.life_hours) : null} />}>
