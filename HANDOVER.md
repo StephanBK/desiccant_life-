@@ -1,8 +1,67 @@
 # HANDOVER — Desiccant Lifetime Simulator (ANLY-003)
 
-Last session: 2026-09-24 (session 8, year-boundary guard, hermetic breathing fix). Before that 2026-09-15 (session 4). State: v0.5 (series pressure
+Last session: 2026-10-19 (session 9, room humidity mode + stack factor, API v0.2.0). Before that 2026-09-24 (session 8, year-boundary guard, hermetic breathing fix). State: v0.5 (series pressure
 model + single-sided loops) pushed: main on GitHub at 2748f2b + the
 tab-consistency commit after it, Railway serves it.
+
+## Session 9 (2026-10-19): room humidity mode, stack factor (calibration vs CU Boulder)
+
+- WHY: a des2 report for 2000 Colorado Avenue, Boulder (CU Gamow Tower,
+  floor 10 faculty offices; SWR-VIG over single pane, installed from Nov 10
+  2025, substantial completion Jun 15 2026) predicted 7 fog days a year;
+  Stephan reports none observed. Findings (live engine, then a local copy
+  on the same NSRDB year, matching live to the digit):
+  - The report's 20 floors / window on 10 (stack near zero) was wrong: the
+    tower has 11 floors, so floor 10 sits 14.4 m above the neutral plane,
+    about +16 Pa outward in a Boulder winter, and the model gives 53 fog
+    days, not 7. Stack strength alone (100 / 82 / 63 / 51 %: 53 / 52 / 51 /
+    46) does not close the gap: any outward push fills the cavity with room
+    air (about 19 air changes an hour through a 0.06 retrofit at 10 Pa).
+  - The fixed 20 % room RH decided it. An unhumidified Boulder room in the
+    661 hours below 25 F sits at a median 8 % RH (max 15 %) before people.
+  - The floor 2-10 SWRs are Velcro-attached (not wet-sealed); CU's Colin
+    McGruer found about half loose on Mar 20 2026. With loose units even the
+    new mode gives Gamow tens of fog days, so the zero is not fully
+    explained (drier offices than 1.2 g/kg, or night-only fog nobody saw).
+- NEW (engine.room): LifetimeInputs.room_humidity "fixed" (default, exactly
+  as before) or "unhumidified": W_room(h) = W_out(h) + occupants. Occupants
+  1.2 g/kg during HVAC-occupied hours at sea level (36-44 W latent per
+  office worker = 53-65 g/h, into 17 cfm/person of ASHRAE 62.1 air =
+  34.7 kg/h: 1.5-1.9 g/kg at full design occupancy, 1.2 at about 70 %;
+  ESTIMATE, people_gkg 0..10), x P_sea / P_site at altitude, fading after
+  hours at people_fade_ach 0.5 / h (ESTIMATE), capped at 60 % RH when
+  outdoors > 60 F (A/C) and 99 % always; two passes of the year so Jan 1
+  continues from Dec 31. HourTables.w_room_h carries the series (w_room
+  stays a float, its annual mean, for display).
+- NEW: stack_factor 0..1 (default 1.0 = before) scales the height above the
+  neutral plane, i.e. the stack pressure (it is linear in it). NRC CBD 107:
+  up to about 80 % of the theoretical stack lands on the exterior wall.
+- API: room_humidity, people_gkg, people_fade_ach, stack_factor (echoed;
+  defaults in /api/presets); payload "room": {mode, heating_season:
+  {median_pct, p10_pct, p90_pct}} (room RH at room temperature, Oct-Apr).
+  APP_VERSION 0.2.0. With every new input at its default nothing changes:
+  all 347 earlier tests pass, and 277 Park / des2 parity is untouched.
+- Direction of the new mode (24 cases: 8 cities x 3 assemblies, des2
+  inputs, real code; today's fixed 30 % = 1,289 fog days in total): people
+  0.8 g/kg 601 (-53 %), 1.2 g/kg 1,058 (-18 %), 1.9 g/kg 1,886 (+46 %).
+  Dry, cold sites fall (Boulder 50 -> 0); humid winters rise (Seattle,
+  des2 default 0 -> 165 at 1.2). It is the right room air for a building
+  without a humidifier, not a "less fog" knob.
+- CORRECTION recorded: a scratch experiment earlier the same day built the
+  room series with a one-week warm-up that shifted it 168 h against the
+  weather and reported -3 / +26 / +75 %; the real code (and the numbers
+  above) are aligned, proven by tests/test_room_humidity.py.
+- PRE-EXISTING, not fixed (seen on untouched main 9d1eaeb with the saved
+  Hypothesis example): tests/test_properties.py::test_outputs_are_finite_and_bounded
+  can find a desiccant of 6e-8 g at 77-89 ACH (parallel model) whose
+  loading overshoots q_max by 0.15 % (0.2103 vs 0.21). Stiff coupled step
+  for a near-zero mass; no app sends such inputs. Fix candidate: clamp q at
+  q_max in coupled_substep, or treat grams below 1e-3 as zero.
+- Tests: tests/test_room_humidity.py (25): series (fade, altitude, caps,
+  New Year wrap), validation, fixed mode ignores the new inputs, the hourly
+  path fed a constant reproduces fixed mode to the last digit (0 g and
+  300 g), more occupant moisture never less fog, stack factor = shorter
+  floors, API echo / room summary / 400s. Suite 372.
 
 ## Session 8 (2026-09-24): year-boundary guard; hermetic breathing bug
 

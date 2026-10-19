@@ -90,6 +90,11 @@ from engine.psychro import (
     w_from_t_rh,
     w_saturated,
 )
+from engine import room as room_mod
+from engine.room import (
+    DEFAULT_PEOPLE_FADE_ACH, DEFAULT_PEOPLE_GKG, DEFAULT_ROOM_HUMIDITY,
+    MAX_PEOPLE_FADE_ACH, MAX_PEOPLE_GKG, ROOM_HUMIDITY_MODES,
+)
 
 # ---------------------------------------------------------------------------
 # Presets for the two air paths. ESTIMATES - same caveat as engine.moisture.
@@ -207,8 +212,26 @@ class LifetimeInputs:
     substeps: int = 4
     max_film_kg: float = MAX_SURFACE_FILM_KG_PER_M2
     visible_film_kg: float = VISIBLE_FILM_KG_PER_M2
+    # Room air (engine.room, Oct 19 2026). "fixed" uses rh_room every hour,
+    # exactly as before. "unhumidified": outdoor moisture plus the occupants'
+    # (people_gkg during occupied hours, at sea level, fading after hours at
+    # people_fade_ach); rh_room is then ignored.
+    room_humidity: str = DEFAULT_ROOM_HUMIDITY
+    people_gkg: float = DEFAULT_PEOPLE_GKG
+    people_fade_ach: float = DEFAULT_PEOPLE_FADE_ACH
+    # Share of the theoretical stack pressure that lands on the facade
+    # (floors and shafts take the rest). 1.0 = the ideal formula, as before.
+    stack_factor: float = 1.0
 
     def __post_init__(self) -> None:
+        if self.room_humidity not in ROOM_HUMIDITY_MODES:
+            raise ValueError(f"room_humidity must be one of {ROOM_HUMIDITY_MODES}, got {self.room_humidity!r}")
+        if not 0.0 <= self.people_gkg <= MAX_PEOPLE_GKG:
+            raise ValueError(f"people_gkg must be within 0..{MAX_PEOPLE_GKG}")
+        if not 0.0 <= self.people_fade_ach <= MAX_PEOPLE_FADE_ACH:
+            raise ValueError(f"people_fade_ach must be within 0..{MAX_PEOPLE_FADE_ACH}")
+        if not 0.0 <= self.stack_factor <= 1.0:
+            raise ValueError("stack_factor must be within 0..1")
         if not 0.0 <= self.f_cold <= 1.0:
             raise ValueError(f"f_cold must be in [0, 1], got {self.f_cold}")
         if not 0.0 <= self.f_warm <= 1.0:
@@ -295,6 +318,10 @@ class HourTables:
     #: Single-sided loop ACH through each layer (series model); empty for legacy.
     loop_out: list[float] = field(default_factory=list)
     loop_in: list[float] = field(default_factory=list)
+    #: Hourly room humidity ratio when room_humidity is "unhumidified"; None
+    #: for a fixed room (w_room then applies every hour). With a series,
+    #: w_room above is only its annual mean, for display.
+    w_room_h: list[float] | None = None
 
 
 @dataclass
@@ -427,11 +454,20 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
     p_atm = atmospheric_pressure_pa(weather.elevation_m)
     gap = inp.geometry.offset_m
     w_room = w_from_t_rh(inp.t_room_c, inp.rh_room, p_atm_pa=p_atm)
+    w_room_h: list[float] | None = None
+    if inp.room_humidity == "unhumidified":
+        # engine.room: outdoor moisture plus the occupants'. Called through
+        # the module so tests can substitute the series.
+        w_room_h = room_mod.unhumidified_room_w(
+            weather.t_out_c, weather.rh_out, inp.t_room_c, p_atm, inp.hvac.is_occupied,
+            inp.people_gkg, inp.people_fade_ach)
+        w_room = sum(w_room_h) / len(w_room_h)       # display only; the hours use w_room_h
     has_wind = bool(weather.wind_m_s)
     has_wdir = bool(getattr(weather, "wind_dir_deg", None))
     has_cloud = bool(weather.cloud_type)
     series = inp.uses_series_model
-    h_npl = inp.height_above_npl_m if series else 0.0
+    # stack_factor scales the stack pressure, which is linear in this height.
+    h_npl = inp.height_above_npl_m * inp.stack_factor if series else 0.0
     dp_l: list[float] = []
     loop_out_l: list[float] = []
     loop_in_l: list[float] = []
@@ -456,6 +492,12 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
     ad_in_l: list[float] = []
 
     for i in range(n):
+        if w_room_h is None:
+            w_r, j_in_h, slope_in_h = w_room, j_in, pw_per_w_in
+        else:
+            w_r = w_room_h[i]
+            j_in_h = sealant_diffusion_kg_per_h(perim, inp.bead_width_m, inp.bead_depth_m, SEALANTS[inp.sealant_in], p_w_from_w(w_r, p_atm)) / area
+            slope_in_h = slope(w_r)
         t_o = weather.t_out_c[i]
         rh_o = min(max(weather.rh_out[i], 0.0), 1.0)
         wind = weather.wind_m_s[i] if has_wind else 2.0
@@ -516,18 +558,18 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
         )
 
         w_out = w_from_t_rh(t_o, rh_o, p_atm_pa=p_atm) if rh_o > 0 else 0.0
-        w_sup = (a_out * w_out + a_in * w_room) / a_tot if a_tot > 0 else w_room
+        w_sup = (a_out * w_out + a_in * w_r) / a_tot if a_tot > 0 else w_r
 
         t_cold_l.append(t_cold); t_air_l.append(t_air)
         w_sat_l.append(w_saturated(t_cold, p_atm_pa=p_atm))
-        m_cav_l.append(cavity_dry_air_mass(t_air, gap_m=gap, w=w_room, p_atm_pa=p_atm))
+        m_cav_l.append(cavity_dry_air_mass(t_air, gap_m=gap, w=w_r, p_atm_pa=p_atm))
         w_out_l.append(w_out); a_out_l.append(a_out); a_tot_l.append(a_tot)
         w_sup_l.append(w_sup); rise_l.append(rise)
         j_out = sealant_diffusion_kg_per_h(perim, inp.bead_width_m, inp.bead_depth_m, SEALANTS[inp.sealant_out], p_w_from_w(w_out, p_atm)) / area if w_out > 0 else 0.0
-        diff_l.append(j_in + j_out)
+        diff_l.append(j_in_h + j_out)
         m_c = m_cav_l[-1]
         ad_out_l.append(g_out * slope(w_out) / m_c if m_c > 0 else 0.0)
-        ad_in_l.append(g_in * pw_per_w_in / m_c if m_c > 0 else 0.0)
+        ad_in_l.append(g_in * slope_in_h / m_c if m_c > 0 else 0.0)
 
     if series and inp.breathing:
         # Breathing needs the cavity air temperature series, so it is added
@@ -549,14 +591,15 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
             a_tot = a_tot_l[i] + b
             a_in = a_tot - a_out
             a_out_l[i] = a_out; a_tot_l[i] = a_tot
-            w_sup_l[i] = (a_out * w_out_l[i] + a_in * w_room) / a_tot if a_tot > 0 else w_room
+            w_r = w_room_h[i] if w_room_h is not None else w_room
+            w_sup_l[i] = (a_out * w_out_l[i] + a_in * w_r) / a_tot if a_tot > 0 else w_r
 
     return HourTables(
         n=n, t_out_c=list(weather.t_out_c), w_out=w_out_l, t_cold_c=t_cold_l,
         t_air_c=t_air_l, w_sat_cold=w_sat_l, m_cav=m_cav_l, ach_out=a_out_l,
         ach_total=a_tot_l, w_supply=w_sup_l, vent_rise_k=rise_l, w_room=w_room,
         diff_kg_per_m2_h=diff_l, ach_diff_out=ad_out_l, ach_diff_in=ad_in_l,
-        dp_pa=dp_l, loop_out=loop_out_l, loop_in=loop_in_l,
+        dp_pa=dp_l, loop_out=loop_out_l, loop_in=loop_in_l, w_room_h=w_room_h,
     )
 
 
@@ -976,7 +1019,8 @@ def run_lifetime(
             ad_out = tb.ach_diff_out[i] if tb.ach_diff_out else 0.0
             ad_in = tb.ach_diff_in[i] if tb.ach_diff_in else 0.0
             a_m = a_tot + ad_out + ad_in                          # moisture exchange, 1/h
-            w_sup_m = ((a_out + ad_out) * w_out + (a_in + ad_in) * tb.w_room) / a_m if a_m > 0 else w_sup
+            w_rm = tb.w_room_h[i] if tb.w_room_h is not None else tb.w_room
+            w_sup_m = ((a_out + ad_out) * w_out + (a_in + ad_in) * w_rm) / a_m if a_m > 0 else w_sup
             if m_des > 0.0:
                 # Coupled air/desiccant/pane step. Substeps only need to
                 # resolve the desiccant's own time constant.
@@ -995,7 +1039,7 @@ def run_lifetime(
                 hour_vent += (w_cav - w0) * m_cav + c - e
                 film, _drained = drain_excess(film, inp.max_film_kg)
             n_out, n_in, n_diff = split_exchange_net(
-                hour_vent, a_out, ad_out, w_out, a_in, ad_in, tb.w_room, m_cav, 1.0)
+                hour_vent, a_out, ad_out, w_out, a_in, ad_in, w_rm, m_cav, 1.0)
             y_out += n_out; y_in += n_in; y_diff += n_diff
             if in_heating_season(i):
                 h_out += n_out; h_in += n_in; h_diff += n_diff

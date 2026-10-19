@@ -43,8 +43,14 @@ from engine.pressure import (
 from engine.solar import ORIENTATIONS, poa_series
 from engine.sweep import SWEEPABLE, sweep_1d, sweep_2d
 from engine.weather import WeatherError, get_weather_for_address
+from engine.room import (
+    DEFAULT_PEOPLE_FADE_ACH, DEFAULT_PEOPLE_GKG, DEFAULT_ROOM_HUMIDITY,
+    MAX_PEOPLE_FADE_ACH, MAX_PEOPLE_GKG, ROOM_HUMIDITY_MODES, room_rh_summary,
+)
+from engine.lifetime import in_heating_season
+from engine.psychro import atmospheric_pressure_pa
 
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 APP_NAME = "INOVUES Desiccant Lifetime Simulator"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -72,6 +78,10 @@ DEFAULTS = {
     "floors": DEFAULT_FLOORS, "window_floor": DEFAULT_WINDOW_FLOOR, "floor_height_ft": round(DEFAULT_FLOOR_HEIGHT_M / 0.3048, 2),
     "series_model": True, "breathing": True,
     "loops": True, "loop_k": DEFAULT_LOOP_K, "loop_n": DEFAULT_LOOP_EXPONENT,
+    # Room air (engine.room, Oct 19 2026): "fixed" RH as before, or
+    # "unhumidified" (outdoor moisture + occupants). Stack factor 1.0 = ideal.
+    "room_humidity": DEFAULT_ROOM_HUMIDITY, "people_gkg": DEFAULT_PEOPLE_GKG,
+    "people_fade_ach": DEFAULT_PEOPLE_FADE_ACH, "stack_factor": 1.0,
 }
 
 
@@ -221,6 +231,10 @@ def _parse_inputs() -> tuple[LifetimeInputs, dict]:
             max_years=_int("max_years", 20, 1, 50),
             substeps=_int("substeps", 4, 1, 24),
             visible_film_kg=_float("visible_um", 5.0, 0.0, 1000.0) / 1000.0,
+            room_humidity=_choice("room_humidity", {m: m for m in ROOM_HUMIDITY_MODES}, DEFAULTS["room_humidity"]),
+            people_gkg=_float("people_gkg", DEFAULTS["people_gkg"], 0.0, MAX_PEOPLE_GKG),
+            people_fade_ach=_float("people_fade_ach", DEFAULTS["people_fade_ach"], 0.0, MAX_PEOPLE_FADE_ACH),
+            stack_factor=_float("stack_factor", DEFAULTS["stack_factor"], 0.0, 1.0),
         )
     except ValueError as exc:
         raise BadRequest(str(exc))
@@ -240,6 +254,9 @@ def _parse_inputs() -> tuple[LifetimeInputs, dict]:
         "floors": inp.building_floors, "window_floor": inp.window_floor,
         "floor_height_ft": round(inp.floor_height_m / 0.3048, 2),
         "height_above_npl_ft": round(inp.height_above_npl_m / 0.3048, 1),
+        "stack_factor": inp.stack_factor,
+        "room_humidity": inp.room_humidity, "people_gkg": inp.people_gkg,
+        "people_fade_ach": inp.people_fade_ach,
         "facade_azimuth_deg": inp.facade_azimuth_deg,
         "sealant_out": inp.sealant_out, "sealant_in": inp.sealant_in,
         "bead_width_in": round(inp.bead_width_m / 0.0254, 3), "bead_depth_in": round(inp.bead_depth_m / 0.0254, 3),
@@ -307,6 +324,18 @@ def _round_dict(d: dict, nd: int = 2) -> dict:
     return {k: (None if v is None else round(v, nd)) for k, v in d.items()}
 
 
+def _room_summary(r: LifetimeResult, weather) -> dict:
+    """Room air as simulated: the mode and the room RH at room temperature in
+    the heating season (median, 10th and 90th percentile). For a fixed room
+    all three equal rh_in."""
+    tb, inp = r.tables, r.inputs
+    p_atm = atmospheric_pressure_pa(weather.elevation_m)
+    out = {"mode": inp.room_humidity}
+    if tb is not None:
+        out["heating_season"] = room_rh_summary(tb.w_room_h, tb.w_room, inp.t_room_c, p_atm, in_heating_season, tb.n)
+    return out
+
+
 def _result_payload(r: LifetimeResult, echo: dict, location, weather, cached: bool, trace: bool) -> dict:
     tb = r.tables
     payload = {
@@ -316,6 +345,7 @@ def _result_payload(r: LifetimeResult, echo: dict, location, weather, cached: bo
         "weather": {**weather.describe(), "cached": cached},
         "headline": _headline(r),
         "pressure": _pressure_summary(tb, weather),
+        "room": _room_summary(r, weather),
         # Net water by source. "life": up to the hour the sieve is full (the
         # headline split); "run": the whole simulation incl. aftermath.
         # Shares are signed and sum to 100; a negative share is a path that
@@ -406,6 +436,8 @@ ASSUMPTIONS = [
     "Lifetime: the tighter layer sets the THROUGH-flow, but each layer's own leakage sets its single-sided LOOP with the side it faces, so BOTH seals matter. A hermetic retrofit over an unsealed old window still breathes outdoor air at a few ACH through the old window alone. Once both are airtight the sealant's vapour permeability is the floor.",
     "The two hermetic / wet-sealed presets bracket one unknown: what a field-applied silicone wet seal actually leaks. Weeks at the E283 floor, years at IGU-grade. A cavity pressure-decay test on an installed unit is the measurement that settles it.",
     "TMY year repeated; no climate trend, no year-to-year variation.",
+    "Room air: 'fixed' holds rh_in every hour. 'unhumidified' (no humidifier) uses the outdoor air's moisture plus the occupants': 1.2 g/kg during occupied hours by default (36 to 44 W latent per seated office worker, 53 to 65 g/h of water, into 17 cfm of ASHRAE 62.1 outdoor air per person; about 70 % of design occupancy; ESTIMATE), scaled by P_sea / P_site at altitude, fading after hours at 0.5 air changes per hour (ESTIMATE), capped at 60 % RH in hours above 60 F outdoors (air conditioning) and at 99 % RH always. Drier than a fixed RH in cold, dry climates; can be wetter in humid winters.",
+    "Stack factor scales the theoretical stack pressure (default 1.0, the ideal formula). Measured tall buildings put up to about 80 % of it across the exterior wall (NRC Canadian Building Digest 107).",
 ]
 
 
