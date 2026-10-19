@@ -826,6 +826,17 @@ def coupled_substep(
     w_new = W
     if m_des > 0.0:
         q = max(0.0, q + uptake / m_des)
+        # The sieve can never hold more than q_max_25 (no bonus below 25 C).
+        # Only a near-zero mass gets past it: the uptake is the air's water
+        # balance, and its rounding residue divided by micrograms overshot
+        # (1e-6 g at 145 ACH: 0.210033, found by tests/test_properties.py).
+        # The sieve is full; the excess stays in the air, so the water
+        # balance still closes. Real masses never reach this branch.
+        if q > des.q_max_25:
+            extra = (q - des.q_max_25) * m_des
+            q = des.q_max_25
+            uptake -= extra
+            w_new += extra / m_cav
     if film > film_cap:
         film = film_cap
     return w_new, q, film, condensed, uptake, vent_net

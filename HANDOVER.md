@@ -51,17 +51,21 @@ tab-consistency commit after it, Railway serves it.
   room series with a one-week warm-up that shifted it 168 h against the
   weather and reported -3 / +26 / +75 %; the real code (and the numbers
   above) are aligned, proven by tests/test_room_humidity.py.
-- PRE-EXISTING, not fixed (seen on untouched main 9d1eaeb with the saved
-  Hypothesis example): tests/test_properties.py::test_outputs_are_finite_and_bounded
-  can find a desiccant of 6e-8 g at 77-89 ACH (parallel model) whose
-  loading overshoots q_max by 0.15 % (0.2103 vs 0.21). Stiff coupled step
-  for a near-zero mass; no app sends such inputs. Fix candidate: clamp q at
-  q_max in coupled_substep, or treat grams below 1e-3 as zero.
+- FIXED the same day (pre-existing since before session 9, seen on untouched
+  main 9d1eaeb): tests/test_properties.py::test_outputs_are_finite_and_bounded
+  could draw a desiccant of micrograms (6e-8 g, 1e-6 g) at 77 to 145 ACH in the
+  parallel model whose loading overshot q_max (0.210033 vs 0.21): the uptake
+  is the air's water balance, and its rounding residue divided by micrograms is
+  large. coupled_substep now caps q at q_max_25 and leaves the excess in the
+  air (water balance still closes). Bit-identical before / after on 10
+  scenarios (0 g to 8 lb, both humidity modes, loading up to 0.2071); the
+  exact failing case is test_micrograms_of_desiccant_never_exceed_q_max
+  (fails without the cap); the property test passed 10 seeds x 40 examples.
 - Tests: tests/test_room_humidity.py (25): series (fade, altitude, caps,
   New Year wrap), validation, fixed mode ignores the new inputs, the hourly
   path fed a constant reproduces fixed mode to the last digit (0 g and
   300 g), more occupant moisture never less fog, stack factor = shorter
-  floors, API echo / room summary / 400s. Suite 372.
+  floors, API echo / room summary / 400s. Suite 375 (372 + 3 regression).
 
 ## Session 8 (2026-09-24): year-boundary guard; hermetic breathing bug
 

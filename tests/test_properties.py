@@ -392,3 +392,35 @@ def test_taller_window_has_stronger_loop(w, inp, factor):
     if a.loop_out[0] > 0:
         assert b.loop_out[0] == pytest.approx(a.loop_out[0] * factor ** inp.loop_exponent, rel=1e-6)
     assert sum(b.loop_out) >= sum(a.loop_out) * (1 - 1e-9)
+
+
+# ---------------------------------------------------------------------------
+# Regression (2026-10-19): a near-zero desiccant mass overshot q_max
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("grams", [1e-6, 6e-8, 1e-9])
+def test_micrograms_of_desiccant_never_exceed_q_max(grams):
+    """Found by test_outputs_are_finite_and_bounded (fresh clone, 2026-10-19):
+    1e-6 g at 145 ACH (parallel model) reached 0.210033 > q_max 0.21, because
+    the uptake is the air's water balance and its rounding residue divided by
+    micrograms is large. The exact failing case, rebuilt from the strategy's
+    own weather formula (rh0 0.5, 0 C, 72 h)."""
+    n = 72
+    w = WeatherYear(t_out_c=[0.0] * n,
+                    rh_out=[min(0.99, max(0.05, 0.5 + 0.2 * math.sin(2 * math.pi * i / 24 + 1.0))) for i in range(n)],
+                    wind_m_s=[0.0] * n, wind_dir_deg=[])
+    inp = LifetimeInputs(
+        geometry=CavityGeometry(width_m=0.3048, height_m=1.397, offset_m=0.127),
+        f_cold=0.5, f_warm=0.5, u_assembly=1.0, t_room_c=10.0, rh_room=0.5,
+        wind_scaling=False, al_out=3.0, al_in=0.0, dp_pa=14.0, series_model=False,
+        hvac=HvacSchedule(occupied_pa=0.0, unoccupied_pa=0.0, weekdays_only=False),
+        building_floors=1, window_floor=1, floor_height_m=3.0, breathing=False,
+        loops=False, loop_k=0.0, loop_exponent=1.0, desiccant_grams=grams, tau_hours=3.0,
+        allow_desorption=False, full_fraction=0.5, pane_coupling=False, absorptance=0.0,
+        sky_radiation=False, max_years=1,
+    )
+    r = run_lifetime(inp, w)
+    cap = inp.desiccant.q_max_25
+    assert r.final_loading <= cap
+    assert all(0.0 <= q <= cap for q in r.year1["loading"])
+    assert all(x >= 0.0 and math.isfinite(x) for x in r.year1["w_cav"])
