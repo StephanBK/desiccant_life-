@@ -194,7 +194,10 @@ def test_hermetic_cavity_lasts_a_season(base, weather):
 
 def test_no_desiccant_runs_all_years_and_fogs(base, weather):
     from dataclasses import replace
-    r = run_lifetime(replace(base, desiccant_grams=0.0, max_years=2), weather)
+    # 45 % RH: since the 2026-10-25 outdoor-film fix this setup (f 0.30, an
+    # existing double pane) no longer condenses at 35 %, and the test needs
+    # some condensation to check that a run without desiccant still runs.
+    r = run_lifetime(replace(base, desiccant_grams=0.0, max_years=2, rh_room=0.45), weather)
     assert r.exhausted_hour is None and r.hours_per_gram is None
     assert r.years_run == 2
     assert r.first_condensation_hour is not None

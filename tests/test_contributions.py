@@ -57,6 +57,9 @@ def _lifetime_zero_g(weather, a_out, a_in):
         geometry=GEO, f_cold=0.30, f_warm=0.59, u_assembly=1.703,
         absorptance=0.0, sky_radiation=False, pane_coupling=False, wind_scaling=False,
         ach_out=a_out, ach_in=a_in, desiccant_grams=0.0, bead_width_m=0.0, max_years=1,
+        # The original run_year uses the NFRC f every hour, like the sky and
+        # pane-coupling terms switched off above (film fix of 2026-10-25).
+        film_correction=False,
     )
     return run_lifetime(inp, weather, None, keep_year1=True, keep_daily=False)
 

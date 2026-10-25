@@ -57,8 +57,12 @@ from dataclasses import dataclass, field
 
 from engine.cavity import (
     DEFAULT_EXISTING_GLASS,
+    EXISTING_GLASS_CHOICES,
     R_EXISTING_LAYER,
     cavity_air_temperature,
+    centre_of_glass_r_total,
+    f_with_film,
+    infer_existing_glass,
     cavity_dry_air_mass,
     cloud_opacity,
     exterior_film_coefficient,
@@ -224,9 +228,15 @@ class LifetimeInputs:
     absorptance: float = 0.10
     sky_radiation: bool = True
     # What sits between the existing window's outer surface and its cavity
-    # face (engine.cavity.R_EXISTING_LAYER): "single" or "double" pane. Sets
-    # how much of the sun and sky reaches the cavity face (Oct 25 2026).
+    # face (engine.cavity.R_EXISTING_LAYER): "single" or "double" pane, or
+    # "auto" (picked from f_cold, engine.cavity.infer_existing_glass; replaced
+    # by the pick in __post_init__). Sets how much of the sun and sky reaches
+    # the cavity face and the film correction (Oct 25 2026).
     existing_glass: str = DEFAULT_EXISTING_GLASS
+    # f values are computed by WINDOW at the NFRC 26 W/m2K outdoor film;
+    # True recomputes them each hour at the engine's own film 5.7 + 3.8 v
+    # (engine.cavity.f_with_film, Oct 25 2026). False = the NFRC f every hour.
+    film_correction: bool = True
     max_years: int = 20
     substeps: int = 4
     max_film_kg: float = MAX_SURFACE_FILM_KG_PER_M2
@@ -243,8 +253,12 @@ class LifetimeInputs:
     stack_factor: float = 1.0
 
     def __post_init__(self) -> None:
-        if self.existing_glass not in R_EXISTING_LAYER:
-            raise ValueError(f"existing_glass must be one of {sorted(R_EXISTING_LAYER)}, got {self.existing_glass!r}")
+        if self.existing_glass not in EXISTING_GLASS_CHOICES:
+            raise ValueError(f"existing_glass must be one of {EXISTING_GLASS_CHOICES}, got {self.existing_glass!r}")
+        if not 0.0 <= self.f_cold <= 1.0:
+            raise ValueError(f"f_cold must be in [0, 1], got {self.f_cold}")
+        if self.existing_glass == "auto":
+            self.existing_glass = infer_existing_glass(self.f_cold)
         if self.room_humidity not in ROOM_HUMIDITY_MODES:
             raise ValueError(f"room_humidity must be one of {ROOM_HUMIDITY_MODES}, got {self.room_humidity!r}")
         if not 0.0 <= self.people_gkg <= MAX_PEOPLE_GKG:
@@ -517,6 +531,7 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
     ad_in_l: list[float] = []
     r_layer = inp.r_existing_layer
     f_outer = outer_surface_f(inp.f_cold, r_layer)
+    r_total = centre_of_glass_r_total(inp.f_cold, r_layer)
 
     for i in range(n):
         if w_room_h is None:
@@ -534,15 +549,25 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
         wind_file = weather.wind_m_s[i] if has_wind else 2.0
         wind = wind_file * WIND_STATION_FACTOR if has_wind else 2.0
 
-        t_cold = t_from_f(inp.f_cold, t_out_c=t_o, t_in_c=inp.t_room_c)
-        t_warm = t_from_f(inp.f_warm, t_out_c=t_o, t_in_c=inp.t_room_c)
+        h_out = exterior_film_coefficient(wind)
+        if inp.film_correction:
+            # This hour's outdoor film in place of the NFRC one the f values
+            # were computed with (engine.cavity.f_with_film).
+            f_c = f_with_film(inp.f_cold, r_total, h_out)
+            f_w = f_with_film(inp.f_warm, r_total, h_out)
+            f_o = f_with_film(f_outer, r_total, h_out)
+        else:
+            f_c, f_w, f_o = inp.f_cold, inp.f_warm, f_outer
+        t_cold = t_from_f(f_c, t_out_c=t_o, t_in_c=inp.t_room_c)
+        t_warm = t_from_f(f_w, t_out_c=t_o, t_in_c=inp.t_room_c)
         if poa_w_m2 is not None or inp.sky_radiation:
             # Sun and sky act on the existing window's OUTER surface; the
             # cavity face gets its share through the glass (engine.cavity,
             # outer_heat_response; before Oct 25 2026 it got all of it).
-            h_out = exterior_film_coefficient(wind)
+            # R_rest behind the cavity face does not depend on the film, so
+            # the response at this hour's h_out is already consistent.
             k_surf, k_face = outer_heat_response(inp.f_cold, r_layer, h_out)
-            t_outer = t_from_f(f_outer, t_out_c=t_o, t_in_c=inp.t_room_c)
+            t_outer = t_from_f(f_o, t_out_c=t_o, t_in_c=inp.t_room_c)
             if poa_w_m2 is not None and inp.absorptance > 0.0 and poa_w_m2[i] > 0.0:
                 q_sun = inp.absorptance * poa_w_m2[i]
                 t_outer += q_sun * k_surf

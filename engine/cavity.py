@@ -594,7 +594,29 @@ R_OUT_FILM_NFRC = 1.0 / 26.0
 #: The same layer values as the des2 estimate for an existing double pane
 #: (des2 shared/scenario.js), whose f came within 0.010 of WINDOW.
 R_EXISTING_LAYER: dict[str, float] = {"single": 0.006, "double": 0.212}
-DEFAULT_EXISTING_GLASS = "single"
+
+#: Least resistance that can sit behind the cavity face, m2K/W, centre of
+#: glass: the room film (NFRC 100 winter, about 1/8.3 = 0.12) plus the
+#: narrowest air cavity INOVUES builds (about 0.12), retrofit glass extra.
+#: A single existing pane therefore cannot give a cavity-face f above
+#:     (R_film + 0.006) / (R_film + 0.006 + 0.24) = 0.0445 / 0.2845 = 0.156
+R_REST_MIN = 0.24
+F_MAX_SINGLE = (R_OUT_FILM_NFRC + R_EXISTING_LAYER["single"]) / (
+    R_OUT_FILM_NFRC + R_EXISTING_LAYER["single"] + R_REST_MIN)
+
+#: "auto" (the default for callers that do not say) picks the existing glass
+#: from f: single up to F_MAX_SINGLE, double above it. des2 always says;
+#: the 277 Park app sends single-pane f values (0.014 to 0.068, single);
+#: the Odoo simulator's default f 0.30 is an existing double pane.
+EXISTING_GLASS_CHOICES = ("auto", "single", "double")
+DEFAULT_EXISTING_GLASS = "auto"
+
+
+def infer_existing_glass(f_cold: float) -> str:
+    """The existing glass a cavity-face f can belong to (see R_REST_MIN)."""
+    if not 0.0 <= f_cold <= 1.0:
+        raise ValueError(f"f_cold must be in [0, 1], got {f_cold}")
+    return "single" if f_cold <= F_MAX_SINGLE else "double"
 
 
 def outer_surface_f(f_cold: float, r_existing_layer: float) -> float:
@@ -664,3 +686,60 @@ def outer_heat_response(f_cold: float, r_existing_layer: float, h_out_w_m2k: flo
     r_behind = r_existing_layer + r_rest
     k_surface = 1.0 / (h_out_w_m2k + 1.0 / r_behind)
     return k_surface, k_surface * r_rest / r_behind
+
+
+# ---------------------------------------------------------------------------
+# f at the hour's own outdoor film (Oct 25 2026)
+# ---------------------------------------------------------------------------
+#
+# WHAT WAS WRONG
+# An f value from WINDOW is computed with the NFRC 100 winter exterior film,
+# 26 W/m2K, which is about 5.5 m/s of wind on the McAdams fit
+# (5.7 + 3.8 x 5.5 = 26.6). The engine then used that f in every hour, while
+# its own film for the same hour is 5.7 + 3.8 v. In a calmer hour the
+# outdoor film insulates more, so every node of the glass sits a little
+# warmer than the NFRC f says; in a windier hour, a little colder. Centre of
+# glass only the film changes, so f is recomputed from the NFRC chain with
+# that one resistance swapped.
+
+def centre_of_glass_r_total(f_cold: float, r_existing_layer: float) -> float:
+    """Total centre-of-glass resistance at NFRC conditions, m2K/W, recovered
+    from the cavity-face f and the existing glass layer:
+
+        R_total = (R_film + R_layer) / f_cold
+
+    Infinite for f_cold = 0 (the pane is pinned to outdoors)."""
+    if not 0.0 <= f_cold <= 1.0:
+        raise ValueError(f"f_cold must be in [0, 1], got {f_cold}")
+    if r_existing_layer < 0.0:
+        raise ValueError("r_existing_layer cannot be negative")
+    if f_cold <= 0.0:
+        return math.inf
+    return (R_OUT_FILM_NFRC + r_existing_layer) / f_cold
+
+
+def f_with_film(f_nfrc: float, r_total_nfrc: float, h_out_w_m2k: float) -> float:
+    """A node's temperature factor with the outdoor film 1/h_out in place of
+    the NFRC film the f was computed with.
+
+        R_outboard = f_nfrc . R_total - R_film + 1/h_out
+        f          = R_outboard / (R_total - R_film + 1/h_out)
+
+    WORKED EXAMPLE, single pane + SWR (f 0.068), h_out 13.3 (2 m/s at 10 m):
+        R_total = 0.0445 / 0.068 = 0.654
+        f = (0.0445 - 0.0385 + 0.0752) / (0.654 - 0.0385 + 0.0752)
+          = 0.0812 / 0.6907 = 0.118
+        At 0 degC outdoors and 21 degC in the room the cavity face is
+        (0.118 - 0.068) x 21 = 1.0 K warmer than the NFRC f put it.
+    At h_out = 26 it returns f_nfrc exactly."""
+    if h_out_w_m2k <= 0.0:
+        raise ValueError(f"h_out must be positive, got {h_out_w_m2k}")
+    if not 0.0 <= f_nfrc <= 1.0:
+        raise ValueError(f"f must be in [0, 1], got {f_nfrc}")
+    if math.isinf(r_total_nfrc):
+        return f_nfrc
+    if r_total_nfrc <= 0.0:
+        raise ValueError("r_total_nfrc must be positive")
+    d = 1.0 / h_out_w_m2k - R_OUT_FILM_NFRC
+    r_out = max(0.0, f_nfrc * r_total_nfrc + d)
+    return min(1.0, r_out / (r_total_nfrc + d))

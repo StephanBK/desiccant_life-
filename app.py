@@ -25,7 +25,7 @@ from dataclasses import asdict, replace
 from flask import Flask, Response, jsonify, request, send_from_directory
 
 from engine import psychro
-from engine.cavity import DEFAULT_EXISTING_GLASS, R_EXISTING_LAYER, f_warm_estimate
+from engine.cavity import DEFAULT_EXISTING_GLASS, EXISTING_GLASS_CHOICES, F_MAX_SINGLE, R_EXISTING_LAYER, f_warm_estimate
 from engine.desiccant import DESICCANTS, DEFAULT_DESICCANT, cartridge_volume_ml
 from engine.geometry import CavityGeometry
 from engine.leakage import (
@@ -74,6 +74,8 @@ DEFAULTS = {
     # Existing window behind the cavity (Oct 25 2026): sets how much of the
     # sun and sky on its outer surface reaches the cavity face.
     "existing_glass": DEFAULT_EXISTING_GLASS,
+    # f recomputed each hour at the engine's outdoor film (Oct 25 2026).
+    "film_correction": True,
     # Signed pressure model (engine.pressure): HVAC schedule, stack from
     # floor position, wind by direction against the facade.
     "p_occ_pa": DEFAULT_P_OCCUPIED_PA, "p_unocc_pa": DEFAULT_P_UNOCCUPIED_PA,
@@ -231,7 +233,8 @@ def _parse_inputs() -> tuple[LifetimeInputs, dict]:
             pane_coupling=_bool("pane_coupling", True),
             absorptance=_float("absorptance", DEFAULTS["absorptance"], 0.0, 1.0),
             sky_radiation=_bool("sky_radiation", True),
-            existing_glass=_choice("existing_glass", R_EXISTING_LAYER, DEFAULTS["existing_glass"]),
+            existing_glass=_choice("existing_glass", {k: k for k in EXISTING_GLASS_CHOICES}, DEFAULTS["existing_glass"]),
+            film_correction=_bool("film_correction", DEFAULTS["film_correction"]),
             max_years=_int("max_years", 20, 1, 50),
             substeps=_int("substeps", 4, 1, 24),
             visible_film_kg=_float("visible_um", 5.0, 0.0, 1000.0) / 1000.0,
@@ -271,6 +274,7 @@ def _parse_inputs() -> tuple[LifetimeInputs, dict]:
         "desorption": inp.allow_desorption, "full_fraction": inp.full_fraction,
         "pane_coupling": inp.pane_coupling, "absorptance": inp.absorptance,
         "sky_radiation": inp.sky_radiation, "existing_glass": inp.existing_glass,
+        "film_correction": inp.film_correction,
         "max_years": inp.max_years,
         "cartridge_ml": round(cartridge_volume_ml(inp.desiccant_grams, inp.desiccant), 1),
         "capacity_g": round(inp.desiccant_grams * inp.desiccant.q_max(25.0), 2),
@@ -435,6 +439,7 @@ ASSUMPTIONS = [
     "Wet-sealed preset (0.005 cfm/ft2) is the ASTM E283 detection floor, not a measurement of INOVUES seals; a cavity pressurisation test would replace it.",
     "Sealant vapour diffusion uses ASTM E96 permeability ranges (silicone 30, PIB 0.3 g.mm/m2/day). Each bead is a SIGNED path driven by its own vapour-pressure gradient, room-to-cavity through the retrofit bead and outdoor-to-cavity through the existing window's bead, folded into the same balance as the vents; a bead facing a drier side removes water. The dry-cavity flux (full source vapour pressure against an empty cavity) is the reporting upper bound.",
     "Sun and sky act on the existing window's OUTER surface; the cavity face gets its centre-of-glass share through the existing glass (6 mm for a single pane, the whole IGU for an existing double pane), with part of the flux flowing to the room. Sky loss is evaluated at the outer-surface temperature.",
+    "f values from WINDOW use the NFRC 100 winter outdoor film (26 W/m2K, about 5.5 m/s); each hour they are recomputed at the engine's own film, 5.7 + 3.8 v (McAdams, 10 m wind), swapping that one resistance in the centre-of-glass chain. Calmer hours leave the glass a little warmer than the NFRC f, windier hours a little colder.",
     "Pane warming from vent air is an upper bound.",
     "Evaporation from the pane is instantaneous up to saturation (upper bound on drying).",
     "Retained film cap 100 um; visible threshold 5 um; both unmeasured.",
@@ -488,7 +493,8 @@ def presets():
         ],
         "sweepable": SWEEPABLE,
         "orientations": list(ORIENTATIONS),
-        "existing_glass": [{"key": k, "r_layer_m2k_w": v} for k, v in R_EXISTING_LAYER.items()],
+        "existing_glass": [{"key": "auto", "r_layer_m2k_w": None, "note": f"single if f_cold <= {F_MAX_SINGLE:.3f}, else double"}]
+                          + [{"key": k, "r_layer_m2k_w": v} for k, v in R_EXISTING_LAYER.items()],
         "assumptions": ASSUMPTIONS,
     })
 

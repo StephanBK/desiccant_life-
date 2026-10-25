@@ -1,6 +1,7 @@
 """Oct 25 2026 fixes: (1) sun and sky reach the cavity face through the
 existing glass, not in full; (2) the 2 m weather wind is converted to the
-10 m station wind the formulas assume.
+10 m station wind the formulas assume; (3) f values are recomputed each
+hour at the engine's own outdoor film instead of the NFRC 26 W/m2K one.
 
 Sources: [PHYSICS] series resistance chain, centre of glass, f at NFRC
          [NSRDB]   wind speed at 2 m since PSM v3 (NSRDB webinar Q&A, Oct 2020)
@@ -17,7 +18,9 @@ import engine.lifetime as L
 from engine.cavity import (
     R_EXISTING_LAYER,
     R_OUT_FILM_NFRC,
+    centre_of_glass_r_total,
     exterior_film_coefficient,
+    f_with_film,
     outer_heat_response,
     outer_surface_f,
     radiative_surface_drop,
@@ -103,7 +106,8 @@ def _inp(f=0.301, glass="double", sky=True, absorptance=0.0, **kw):
                 hvac=HvacSchedule(occupied_pa=0.0, unoccupied_pa=0.0),
                 building_floors=1, window_floor=1, facade_azimuth_deg=0.0,
                 desiccant_grams=0.0, sky_radiation=sky, absorptance=absorptance,
-                pane_coupling=False, existing_glass=glass, max_years=1)
+                pane_coupling=False, existing_glass=glass, max_years=1,
+                film_correction=False)        # fix 3 off: these isolate fix 1
     base.update(kw)
     return LifetimeInputs(**base)
 
@@ -148,6 +152,16 @@ def test_existing_glass_is_validated():
         _inp(glass="triple")
 
 
+def test_auto_existing_glass():
+    from engine.cavity import F_MAX_SINGLE, infer_existing_glass
+    # (1/26 + 0.006) / (1/26 + 0.006 + 0.24) = 0.156
+    assert F_MAX_SINGLE == pytest.approx(0.0445 / 0.2845, abs=5e-4)
+    assert infer_existing_glass(0.068) == "single"     # the 277 Park app's f values
+    assert infer_existing_glass(0.30) == "double"      # the Odoo simulator default
+    assert _inp(f=0.30, glass="auto").existing_glass == "double"
+    assert _inp(f=0.014, glass="auto").existing_glass == "single"
+
+
 # ---------------------------------------------------------------------------
 # Wind: 2 m weather -> 10 m station
 # ---------------------------------------------------------------------------
@@ -184,9 +198,79 @@ def test_api_existing_glass(monkeypatch):
     monkeypatch.setattr(flask_app, "get_weather_for_address", lambda *a, **k: (loc, year, False))
     c = flask_app.app.test_client()
     q = "/api/lifetime?grams=0&max_years=1&trace=0&f_cold=0.301&u_ip=0.249"
-    assert c.get(q).get_json()["inputs"]["existing_glass"] == "single"
+    # Not sent: auto picks from f (0.301 is only possible over a double pane).
+    assert c.get(q).get_json()["inputs"]["existing_glass"] == "double"
+    assert c.get(q.replace("f_cold=0.301", "f_cold=0.068")).get_json()["inputs"]["existing_glass"] == "single"
+    # Sent: used as sent, echoed as sent.
+    assert c.get(q + "&existing_glass=single").get_json()["inputs"]["existing_glass"] == "single"
     assert c.get(q + "&existing_glass=double").get_json()["inputs"]["existing_glass"] == "double"
     assert c.get(q + "&existing_glass=triple").status_code == 400
     p = c.get("/api/presets").get_json()
-    assert p["defaults"]["existing_glass"] == "single"
-    assert {e["key"] for e in p["existing_glass"]} == {"single", "double"}
+    assert p["defaults"]["existing_glass"] == "auto"
+    assert {e["key"] for e in p["existing_glass"]} == {"auto", "single", "double"}
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: f at the hour's own outdoor film
+# ---------------------------------------------------------------------------
+
+def test_f_with_film_is_exact_at_the_nfrc_film():
+    rt = centre_of_glass_r_total(0.068, 0.006)
+    assert f_with_film(0.068, rt, 26.0) == pytest.approx(0.068, abs=1e-15)
+
+
+def test_f_with_film_hand_calc():
+    """single pane + SWR, h_out 13.3: (0.0445 - 0.0385 + 0.0752) /
+    (0.654 - 0.0385 + 0.0752) = 0.118."""
+    rt = centre_of_glass_r_total(0.068, 0.006)
+    assert rt == pytest.approx(0.0445 / 0.068, rel=1e-3)
+    hand = (0.068 * rt - 1 / 26 + 1 / 13.3) / (rt - 1 / 26 + 1 / 13.3)
+    assert f_with_film(0.068, rt, 13.3) == pytest.approx(hand, rel=1e-12)
+    assert f_with_film(0.068, rt, 13.3) == pytest.approx(0.118, abs=0.001)
+
+
+@pytest.mark.parametrize("f, glass", [(0.014, "single"), (0.068, "single"), (0.064, "double"), (0.301, "double")])
+def test_calmer_film_warmer_glass(f, glass):
+    rt = centre_of_glass_r_total(f, R_EXISTING_LAYER[glass])
+    fs = [f_with_film(f, rt, h) for h in (5.7, 13.3, 26.0, 40.0)]
+    assert fs == sorted(fs, reverse=True)
+    assert fs[2] == pytest.approx(f, abs=1e-15)
+
+
+def test_f_with_film_pinned_pane_unchanged():
+    assert f_with_film(0.0, centre_of_glass_r_total(0.0, 0.006), 5.7) == 0.0
+
+
+def test_outer_surface_f_with_film_is_its_film_share():
+    rt = centre_of_glass_r_total(0.068, 0.006)
+    fo = f_with_film(outer_surface_f(0.068, 0.006), rt, 13.3)
+    assert fo == pytest.approx((1 / 13.3) / (rt - 1 / 26 + 1 / 13.3), rel=1e-12)
+
+
+def test_solver_uses_the_hourly_film():
+    w = _year(wind=3.0)
+    tb = build_tables(_inp(f=0.068, glass="single", sky=False, film_correction=True), w, None)
+    h = exterior_film_coefficient(3.0 * L.WIND_STATION_FACTOR)
+    f = f_with_film(0.068, centre_of_glass_r_total(0.068, 0.006), h)
+    assert tb.t_cold_c[0] == pytest.approx(t_from_f(f, -5.0, T_ROOM_C), abs=1e-12)
+    off = build_tables(_inp(f=0.068, glass="single", sky=False, film_correction=False), w, None)
+    assert off.t_cold_c[0] == pytest.approx(t_from_f(0.068, -5.0, T_ROOM_C), abs=1e-12)
+    assert tb.t_cold_c[0] > off.t_cold_c[0]      # 3.8 m/s at 10 m is calmer than NFRC
+
+
+def test_api_film_correction(monkeypatch):
+    import gzip
+    import os
+    from pathlib import Path
+    from engine.weather import Location, parse_nsrdb_csv
+    os.environ.setdefault("MAPBOX_TOKEN", "pk.test")
+    os.environ.setdefault("NREL_API_KEY", "test")
+    import app as flask_app
+    year = parse_nsrdb_csv(gzip.open(Path(__file__).parent / "fixtures" / "nsrdb_277park_tmy_v4.csv.gz", "rt").read())
+    loc = Location("x", "277 PARK AVE, NEW YORK, NY 10172", 40.7568, -73.9742)
+    monkeypatch.setattr(flask_app, "get_weather_for_address", lambda *a, **k: (loc, year, False))
+    c = flask_app.app.test_client()
+    q = "/api/lifetime?grams=0&max_years=1&trace=0"
+    assert c.get(q).get_json()["inputs"]["film_correction"] is True
+    assert c.get(q + "&film_correction=false").get_json()["inputs"]["film_correction"] is False
+    assert c.get("/api/presets").get_json()["defaults"]["film_correction"] is True
