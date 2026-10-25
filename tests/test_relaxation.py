@@ -25,6 +25,7 @@ from engine.cavity import f_warm_estimate
 from engine.desiccant import DESICCANTS
 from engine.geometry import CavityGeometry
 from engine import psychro
+from engine.pressure import HvacSchedule
 
 FIXTURE = Path(__file__).parent / "fixtures" / "nsrdb_277park_tmy_v4.csv.gz"
 MS3A = DESICCANTS["ms3a"]
@@ -50,6 +51,10 @@ def park():
         t_room_c=psychro.f_to_c(70), rh_room=0.35, al_out=0.005, al_in=0.005,
         desiccant_grams=0.0, allow_desorption=False, absorptance=0.1,
         building_floors=50, window_floor=25, facade_azimuth_deg=0.0, max_years=2,
+        # Pre-2026-10-25 site defaults (open-field sky, +5 Pa occupied): the
+        # relaxation mechanics need a foggy year, and with today's urban sky
+        # view and +2 Pa this setup no longer fogs.
+        sky_view_factor=0.5, hvac=HvacSchedule(occupied_pa=5.0),
     )
 
 

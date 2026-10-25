@@ -1,7 +1,9 @@
 """Oct 25 2026 fixes: (1) sun and sky reach the cavity face through the
 existing glass, not in full; (2) the 2 m weather wind is converted to the
-10 m station wind the formulas assume; (3) f values are recomputed each
-hour at the engine's own outdoor film instead of the NFRC 26 W/m2K one.
+10 m station wind (tried, then taken out: the 2 m value is kept as the
+wind at the window); (3) f values are recomputed each hour at the engine's
+own outdoor film instead of the NFRC 26 W/m2K one; (4) sky view factor
+0.35 for a city street; (5) HVAC +2 Pa occupied.
 
 Sources: [PHYSICS] series resistance chain, centre of glass, f at NFRC
          [NSRDB]   wind speed at 2 m since PSM v3 (NSRDB webinar Q&A, Oct 2020)
@@ -118,10 +120,10 @@ def test_solver_sky_drop_is_the_new_share():
     w = _year()
     inp = _inp()
     tb = build_tables(inp, w, None)
-    h = exterior_film_coefficient(3.0 * L.WIND_STATION_FACTOR)
+    h = exterior_film_coefficient(3.0)
     k_s, k_f = outer_heat_response(0.301, 0.212, h)
     t_outer = t_from_f(outer_surface_f(0.301, 0.212), -5.0, T_ROOM_C)
-    expect = t_from_f(0.301, -5.0, T_ROOM_C) - sky_longwave_loss_w_m2(t_outer, -5.0) * k_f
+    expect = t_from_f(0.301, -5.0, T_ROOM_C) - sky_longwave_loss_w_m2(t_outer, -5.0, sky_view_factor=0.35) * k_f
     assert tb.t_cold_c[0] == pytest.approx(expect, abs=1e-9)
 
 
@@ -131,7 +133,7 @@ def test_fix_never_cools_the_face_more_than_before(f, glass):
     new drop is never larger: a smaller share, at a colder surface."""
     w = _year()
     tb = build_tables(_inp(f=f, glass=glass), w, None)
-    h = exterior_film_coefficient(3.0 * L.WIND_STATION_FACTOR)
+    h = exterior_film_coefficient(3.0)
     t0 = t_from_f(f, -5.0, T_ROOM_C)
     old = t0 + radiative_surface_drop(t0, -5.0, h)
     assert tb.t_cold_c[0] >= old - 1e-12
@@ -141,7 +143,7 @@ def test_fix_never_warms_the_face_more_than_before_in_sun():
     w = _year()
     poa = [600.0] * 48
     tb = build_tables(_inp(sky=False, absorptance=0.1), w, poa)
-    h = exterior_film_coefficient(3.0 * L.WIND_STATION_FACTOR)
+    h = exterior_film_coefficient(3.0)
     old = t_from_f(0.301, -5.0, T_ROOM_C) + 0.1 * 600.0 / h
     new_rise = tb.t_cold_c[0] - t_from_f(0.301, -5.0, T_ROOM_C)
     assert 0.0 < new_rise < old - t_from_f(0.301, -5.0, T_ROOM_C)
@@ -166,19 +168,43 @@ def test_auto_existing_glass():
 # Wind: 2 m weather -> 10 m station
 # ---------------------------------------------------------------------------
 
-def test_wind_station_factor():
-    assert L.WIND_STATION_FACTOR == pytest.approx(5.0 ** 0.14)
-    assert L.WIND_STATION_FACTOR == pytest.approx(1.2527, abs=1e-4)
-
-
-def test_wind_pressure_uses_the_10m_wind():
-    """North facade, wind from the north (Cp +0.6), no HVAC, window at the
-    neutral plane (1 floor, floor 1): dP is the wind term alone, at
-    v10 = 1.2527 x v2."""
+def test_wind_is_the_file_value():
+    """The 10 m conversion was taken out: the 2 m wind is the wind at the
+    window. North facade, wind from the north (Cp +0.6), no HVAC, window at
+    the neutral plane: dP = -0.5 x 1.2 x 4^2 x 0.6 = -5.76 Pa."""
+    assert not hasattr(L, "WIND_STATION_FACTOR")
     w = _year(wind=4.0, wdir=0.0)
     tb = build_tables(_inp(sky=False), w, None)
-    assert tb.dp_pa[0] == pytest.approx(wind_dp_pa(4.0 * L.WIND_STATION_FACTOR, 0.0, 0.0), rel=1e-12)
-    assert tb.dp_pa[0] == pytest.approx(-0.5 * 1.2 * (4.0 * 1.2527) ** 2 * 0.6, rel=1e-4)
+    assert tb.dp_pa[0] == pytest.approx(wind_dp_pa(4.0, 0.0, 0.0), rel=1e-12)
+    assert tb.dp_pa[0] == pytest.approx(-5.76, rel=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# Fix 4: sky view factor of a city street; fix 5: +2 Pa occupied
+# ---------------------------------------------------------------------------
+
+def test_urban_sky_view_factor_hand_calc():
+    from engine.cavity import SKY_VIEW_FACTOR_URBAN
+    b = math.atan(0.33)                       # roofline a third of the street width above
+    assert (1 - math.sin(b)) / 2 == pytest.approx(0.343, abs=0.001)
+    assert SKY_VIEW_FACTOR_URBAN == 0.35
+    assert LifetimeInputs.__dataclass_fields__["sky_view_factor"].default == 0.35
+
+
+def test_sky_loss_scales_with_view_factor_in_the_solver():
+    w = _year()
+    a = build_tables(_inp(film_correction=False, sky_view_factor=0.5), w, None)
+    b = build_tables(_inp(film_correction=False, sky_view_factor=0.35), w, None)
+    c = build_tables(_inp(film_correction=False, sky=False), w, None)
+    # drop below the no-sky pane: proportional to F (same outer surface temperature)
+    assert (c.t_cold_c[0] - b.t_cold_c[0]) == pytest.approx(0.7 * (c.t_cold_c[0] - a.t_cold_c[0]), rel=1e-9)
+    with pytest.raises(ValueError):
+        _inp(sky_view_factor=0.6)
+
+
+def test_hvac_default_is_2_pa():
+    from engine.pressure import DEFAULT_P_OCCUPIED_PA
+    assert DEFAULT_P_OCCUPIED_PA == 2.0 and HvacSchedule().occupied_pa == 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +276,7 @@ def test_outer_surface_f_with_film_is_its_film_share():
 def test_solver_uses_the_hourly_film():
     w = _year(wind=3.0)
     tb = build_tables(_inp(f=0.068, glass="single", sky=False, film_correction=True), w, None)
-    h = exterior_film_coefficient(3.0 * L.WIND_STATION_FACTOR)
+    h = exterior_film_coefficient(3.0)
     f = f_with_film(0.068, centre_of_glass_r_total(0.068, 0.006), h)
     assert tb.t_cold_c[0] == pytest.approx(t_from_f(f, -5.0, T_ROOM_C), abs=1e-12)
     off = build_tables(_inp(f=0.068, glass="single", sky=False, film_correction=False), w, None)
@@ -272,5 +298,9 @@ def test_api_film_correction(monkeypatch):
     c = flask_app.app.test_client()
     q = "/api/lifetime?grams=0&max_years=1&trace=0"
     assert c.get(q).get_json()["inputs"]["film_correction"] is True
+    assert c.get(q).get_json()["inputs"]["sky_view_factor"] == 0.35
+    assert c.get(q + "&sky_view_factor=0.5").get_json()["inputs"]["sky_view_factor"] == 0.5
+    assert c.get(q + "&sky_view_factor=0.7").status_code == 400
+    assert c.get(q).get_json()["inputs"]["p_occ_pa"] == 2.0
     assert c.get(q + "&film_correction=false").get_json()["inputs"]["film_correction"] is False
     assert c.get("/api/presets").get_json()["defaults"]["film_correction"] is True

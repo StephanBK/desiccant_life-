@@ -127,7 +127,7 @@ def test_height_above_npl():
 
 def test_hvac_schedule_defaults():
     s = HvacSchedule()
-    assert s.dp_pa(0 * 24 + 9) == 5.0          # Monday 09:00
+    assert s.dp_pa(0 * 24 + 9) == 2.0          # Monday 09:00 (+2 Pa since 2026-10-25, was +5)
     assert s.dp_pa(0 * 24 + 3) == 0.0          # Monday 03:00
     assert s.dp_pa(0 * 24 + 19) == 0.0         # end hour exclusive
     assert s.dp_pa(5 * 24 + 12) == 0.0         # Saturday noon
@@ -154,7 +154,7 @@ def test_breathing_only_on_cooling():
 def test_hour_flow_feeds_one_side_only():
     common = dict(al_out=0.30, al_in=0.005, offset_m=0.01524, t_in_c=21.0, t_out_c=0.0,
                   wind_m_s=0.0, wind_from_deg=None, facade_azimuth_deg=180.0,
-                  height_above_npl=0.0, hvac=HvacSchedule())
+                  height_above_npl=0.0, hvac=HvacSchedule(occupied_pa=5.0))
     occ = hour_flow(hour_of_year=9, **common)       # +5 Pa HVAC, room-fed
     assert occ.dp_pa == pytest.approx(5.0)
     assert occ.ach_out == 0.0 and occ.ach_in > 0

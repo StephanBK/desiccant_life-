@@ -59,6 +59,7 @@ from engine.cavity import (
     DEFAULT_EXISTING_GLASS,
     EXISTING_GLASS_CHOICES,
     R_EXISTING_LAYER,
+    SKY_VIEW_FACTOR_URBAN,
     cavity_air_temperature,
     centre_of_glass_r_total,
     f_with_film,
@@ -149,17 +150,19 @@ WIND_REF_M_S = 4.0
 WIND_EXPONENT = 1.3
 WIND_FLOOR = 0.3
 
-#: Weather wind (2 m above ground) to the 10 m station wind every wind
-#: formula in the engine assumes (Oct 25 2026 fix). The NSRDB reports wind
-#: at 2 m since PSM v3 (NSRDB webinar Q&A, Oct 2020); the pressure model,
-#: the Cp table and the API assumptions were written for 10 m, open
-#: terrain, and the raw 2 m value was being used. Power law, open-terrain
-#: exponent 0.14 (ASHRAE Fundamentals, airflow around buildings):
-#:     v10 = v2 . (10 / 2)^0.14 = 1.253 . v2
-#: Still no height or terrain correction for the window itself. The legacy
-#: bare-ACH scaling (wind_scaled_ach) keeps the file wind: it is a ratio to
-#: its own reference speed, not a physical formula.
-WIND_STATION_FACTOR = (10.0 / 2.0) ** 0.14
+# WIND HEIGHT (decided Oct 25 2026). The NSRDB reports wind at 2 m since
+# PSM v3 (NSRDB webinar Q&A, Oct 2020); the code's notes used to say 10 m.
+# The formulas want the wind AT THE WINDOW, which depends on height and
+# terrain. With the ASHRAE power-law profiles (open-terrain station:
+# exponent 0.14, boundary layer 270 m; urban site: 0.33, 460 m):
+#     v_window / v_2m = (10/2)^0.14 . (270/10)^0.14 . (h/460)^0.33
+#                     = 1.987 . (h/460)^0.33
+#     h = 35 m: 0.85        h = 58 m: 1.00        h = 140 m: 1.34
+# So for the urban, mid-height buildings INOVUES works on, the 2 m value is
+# a fair central estimate of the wind at the window and is used as is. A
+# blanket 10 m open-terrain conversion (x 1.253) was tried the same day and
+# taken out: it overstates city wind and, through stronger suction on
+# leeward walls, made Cleveland and Chicago foggier.
 
 
 def wind_scaled_ach(ach_base: float, wind_m_s: float) -> float:
@@ -237,6 +240,9 @@ class LifetimeInputs:
     # True recomputes them each hour at the engine's own film 5.7 + 3.8 v
     # (engine.cavity.f_with_film, Oct 25 2026). False = the NFRC f every hour.
     film_correction: bool = True
+    # Share of the existing window's view that is sky (engine.cavity,
+    # SKY_VIEW_FACTOR_URBAN; Oct 25 2026). 0.5 = open field.
+    sky_view_factor: float = SKY_VIEW_FACTOR_URBAN
     max_years: int = 20
     substeps: int = 4
     max_film_kg: float = MAX_SURFACE_FILM_KG_PER_M2
@@ -253,6 +259,8 @@ class LifetimeInputs:
     stack_factor: float = 1.0
 
     def __post_init__(self) -> None:
+        if not 0.0 <= self.sky_view_factor <= 0.5:
+            raise ValueError(f"sky_view_factor must be within 0..0.5 (0.5 = open field), got {self.sky_view_factor}")
         if self.existing_glass not in EXISTING_GLASS_CHOICES:
             raise ValueError(f"existing_glass must be one of {EXISTING_GLASS_CHOICES}, got {self.existing_glass!r}")
         if not 0.0 <= self.f_cold <= 1.0:
@@ -542,12 +550,8 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
             slope_in_h = slope(w_r)
         t_o = weather.t_out_c[i]
         rh_o = min(max(weather.rh_out[i], 0.0), 1.0)
-        # 2 m weather wind -> the 10 m station wind the physical formulas
-        # assume (surface film, facade pressure). The legacy bare-ACH scaling
-        # below is a ratio to its own reference speed of the file's wind and
-        # keeps the raw value, so a given ACH means what it always meant.
-        wind_file = weather.wind_m_s[i] if has_wind else 2.0
-        wind = wind_file * WIND_STATION_FACTOR if has_wind else 2.0
+        # The file's 2 m wind, used as the wind at the window (WIND HEIGHT).
+        wind = weather.wind_m_s[i] if has_wind else 2.0
 
         h_out = exterior_film_coefficient(wind)
         if inp.film_correction:
@@ -574,7 +578,8 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
                 t_cold += q_sun * k_face
             if inp.sky_radiation:
                 op = cloud_opacity(weather.cloud_type[i]) if has_cloud else 0.0
-                t_cold -= sky_longwave_loss_w_m2(t_outer, t_o, opacity=op) * k_face
+                t_cold -= sky_longwave_loss_w_m2(t_outer, t_o, sky_view_factor=inp.sky_view_factor,
+                                                 opacity=op) * k_face
 
         if series:
             hf = hour_flow(
@@ -595,7 +600,7 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
             a_out = ach_from_air_leakage(inp.al_out, inp.dp_pa + wind_pressure_pa(wind), gap)
             a_in = inp.ach_in
         elif inp.wind_scaling:
-            a_out = wind_scaled_ach(inp.ach_out, wind_file)
+            a_out = wind_scaled_ach(inp.ach_out, wind)
             a_in = inp.ach_in
         else:
             a_out = inp.ach_out

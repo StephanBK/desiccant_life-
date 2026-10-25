@@ -39,6 +39,10 @@ def base(**kw) -> LifetimeInputs:
         u_assembly=0.78, t_room_c=21.1, rh_room=0.30, al_out=1.0, al_in=0.06,
         desiccant_grams=0.0, absorptance=0.0, sky_radiation=False, max_years=1,
         allow_desorption=True,
+        # +5 Pa occupied, the default before 2026-10-25: these tests need a
+        # foggy year to test the room-air mechanics, and at today's +2 Pa this
+        # setup no longer fogs.
+        hvac=HvacSchedule(occupied_pa=5.0),
     )
     args.update(kw)
     return LifetimeInputs(**args)

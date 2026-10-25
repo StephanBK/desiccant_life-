@@ -406,9 +406,9 @@ def cavity_volume(gap_m: float = 0.0153) -> float:
 #: Exterior film coefficient at zero wind, W/m2K, and its wind slope.
 #: McAdams' flat-plate correlation, h = 5.7 + 3.8 v. APPROXIMATION: it is a
 #: smooth-surface fit and takes no account of facade turbulence or the height
-#: of the window above grade. NSRDB reports wind speed at 2 m; engine.lifetime
-#: converts it to 10 m open terrain before it gets here (Oct 25 2026). A
-#: curtain wall forty storeys up sees more still.
+#: of the window above grade. NSRDB reports wind speed at 2 m, used as the
+#: wind at the window (engine.lifetime, WIND HEIGHT); a curtain wall forty
+#: storeys up sees more.
 H_OUT_STILL_W_M2K = 5.7
 H_OUT_WIND_SLOPE = 3.8
 
@@ -458,7 +458,18 @@ def solar_surface_boost(
 
 STEFAN_BOLTZMANN = 5.670374419e-8      # W/m2K4, exact by SI definition
 GLASS_EMISSIVITY = 0.84                # uncoated soda-lime float, long-wave
-SKY_VIEW_FACTOR_VERTICAL = 0.5         # a wall sees half sky, half ground
+SKY_VIEW_FACTOR_VERTICAL = 0.5         # a wall sees half sky, half ground (open field)
+
+#: Sky view of a window on a city street, the lifetime solver's default
+#: (Oct 25 2026). A vertical window facing a long street sees sky only above
+#: the roofline across it:
+#:     F_sky = (1 - sin b) / 2,  b = elevation of the opposite roofline
+#: Open field b = 0: 0.5. Opposite roofline about a third of the street
+#: width above the window: b = atan(0.33) = 18 deg, F = (1 - 0.31) / 2 = 0.35.
+#: The facade across the street is at or above air temperature, so like the
+#: ground it takes no net long-wave loss. ESTIMATE for INOVUES's typical
+#: urban, mid-height window; an open site (campus, suburb) is closer to 0.5.
+SKY_VIEW_FACTOR_URBAN = 0.35
 
 
 #: Long-wave opacity by NSRDB cloud type code. 0 = fully transparent (clear

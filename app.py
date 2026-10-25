@@ -25,7 +25,7 @@ from dataclasses import asdict, replace
 from flask import Flask, Response, jsonify, request, send_from_directory
 
 from engine import psychro
-from engine.cavity import DEFAULT_EXISTING_GLASS, EXISTING_GLASS_CHOICES, F_MAX_SINGLE, R_EXISTING_LAYER, f_warm_estimate
+from engine.cavity import DEFAULT_EXISTING_GLASS, EXISTING_GLASS_CHOICES, F_MAX_SINGLE, R_EXISTING_LAYER, SKY_VIEW_FACTOR_URBAN, f_warm_estimate
 from engine.desiccant import DESICCANTS, DEFAULT_DESICCANT, cartridge_volume_ml
 from engine.geometry import CavityGeometry
 from engine.leakage import (
@@ -76,6 +76,8 @@ DEFAULTS = {
     "existing_glass": DEFAULT_EXISTING_GLASS,
     # f recomputed each hour at the engine's outdoor film (Oct 25 2026).
     "film_correction": True,
+    # Sky share of the window's view (Oct 25 2026): a city street, 0.35.
+    "sky_view_factor": SKY_VIEW_FACTOR_URBAN,
     # Signed pressure model (engine.pressure): HVAC schedule, stack from
     # floor position, wind by direction against the facade.
     "p_occ_pa": DEFAULT_P_OCCUPIED_PA, "p_unocc_pa": DEFAULT_P_UNOCCUPIED_PA,
@@ -235,6 +237,7 @@ def _parse_inputs() -> tuple[LifetimeInputs, dict]:
             sky_radiation=_bool("sky_radiation", True),
             existing_glass=_choice("existing_glass", {k: k for k in EXISTING_GLASS_CHOICES}, DEFAULTS["existing_glass"]),
             film_correction=_bool("film_correction", DEFAULTS["film_correction"]),
+            sky_view_factor=_float("sky_view_factor", DEFAULTS["sky_view_factor"], 0.0, 0.5),
             max_years=_int("max_years", 20, 1, 50),
             substeps=_int("substeps", 4, 1, 24),
             visible_film_kg=_float("visible_um", 5.0, 0.0, 1000.0) / 1000.0,
@@ -274,7 +277,7 @@ def _parse_inputs() -> tuple[LifetimeInputs, dict]:
         "desorption": inp.allow_desorption, "full_fraction": inp.full_fraction,
         "pane_coupling": inp.pane_coupling, "absorptance": inp.absorptance,
         "sky_radiation": inp.sky_radiation, "existing_glass": inp.existing_glass,
-        "film_correction": inp.film_correction,
+        "film_correction": inp.film_correction, "sky_view_factor": inp.sky_view_factor,
         "max_years": inp.max_years,
         "cartridge_ml": round(cartridge_volume_ml(inp.desiccant_grams, inp.desiccant), 1),
         "capacity_g": round(inp.desiccant_grams * inp.desiccant.q_max(25.0), 2),
@@ -431,15 +434,16 @@ ASSUMPTIONS = [
     "Desiccant time constant (default 2 h) is an estimate; a vendor can measure it.",
     "Leakage presets: AERC baseline (2.0) and best certified insert (0.06 cfm/ft2) are published; the values between are estimates.",
     "The two layers are in SERIES: one signed room-to-outdoor pressure per hour (HVAC schedule + stack + wind), the same air passes both layers, the tighter layer takes most of the pressure and sets the flow, and the cavity is fed from the high-pressure side only. Crack-flow exponent 0.65.",
-    "HVAC pressurisation defaults +5 Pa occupied (weekdays 07 to 19), 0 Pa unoccupied: the low end of the 5 to 25 Pa design range, matching field measurements in existing buildings. ESTIMATE; the value is a parameter.",
+    "HVAC pressurisation defaults +2 Pa occupied (weekdays 07 to 19), 0 Pa unoccupied: field measurements in existing buildings find 1 to 2 Pa (the 5 to 25 Pa design range is rarely held on old facades). +5 Pa until Oct 25 2026. ESTIMATE; the value is a parameter.",
     "Stack pressure from the window's height above a mid-height neutral plane (uniform leakage assumed); building height and floor are parameters.",
-    "Wind pressure 0.5 rho v^2 Cp with Cp from the wind angle off the facade (+0.6 windward, -0.5 side, -0.3 leeward; ESTIMATE from face-averaged values). The weather file's wind is at 2 m (NSRDB since PSM v3) and is converted to a 10 m open-terrain station wind, v10 = 1.253 v2 (power law, exponent 0.14); no height or terrain correction for the window itself. If the weather file lacks wind direction, every windy hour is treated as windward (conservative).",
+    "Wind pressure 0.5 rho v^2 Cp with Cp from the wind angle off the facade (+0.6 windward, -0.5 side, -0.3 leeward; ESTIMATE from face-averaged values). The weather file's wind is at 2 m (NSRDB since PSM v3) and is used as the wind at the window: for an urban site the ASHRAE profiles give 0.85 of it at 35 m and 1.0 near 58 m; low floors see less, towers and open sites more. If the weather file lacks wind direction, every windy hour is treated as windward (conservative).",
     "Each layer also has a SINGLE-SIDED buoyant loop through its own cracks (warm air out the high crack, cold air in the low crack, nothing through the other layer): dP_loop = |rho_side - rho_cavity| g k H, flow of half the layer at dP_loop/2. k (fraction of window height between average inlet and outlet) defaults 0.75, ESTIMATE; exponent 0.65 kept below 1 Pa though flow is probably laminar there (n near 1 would give up to 6x less; conservative for life). Gust pumping and the wind-pressure gradient over the face are not modelled.",
     "Thermal breathing (cavity air contracting as it cools, drawing in from both sides in proportion to their leakage) is included; gust pumping (compression by dP/P_atm per gust through one leaky layer) is not, and only matters below about 0.01 ACH.",
     "Wet-sealed preset (0.005 cfm/ft2) is the ASTM E283 detection floor, not a measurement of INOVUES seals; a cavity pressurisation test would replace it.",
     "Sealant vapour diffusion uses ASTM E96 permeability ranges (silicone 30, PIB 0.3 g.mm/m2/day). Each bead is a SIGNED path driven by its own vapour-pressure gradient, room-to-cavity through the retrofit bead and outdoor-to-cavity through the existing window's bead, folded into the same balance as the vents; a bead facing a drier side removes water. The dry-cavity flux (full source vapour pressure against an empty cavity) is the reporting upper bound.",
     "Sun and sky act on the existing window's OUTER surface; the cavity face gets its centre-of-glass share through the existing glass (6 mm for a single pane, the whole IGU for an existing double pane), with part of the flux flowing to the room. Sky loss is evaluated at the outer-surface temperature.",
     "f values from WINDOW use the NFRC 100 winter outdoor film (26 W/m2K, about 5.5 m/s); each hour they are recomputed at the engine's own film, 5.7 + 3.8 v (McAdams, 10 m wind), swapping that one resistance in the centre-of-glass chain. Calmer hours leave the glass a little warmer than the NFRC f, windier hours a little colder.",
+    "Sky view factor 0.35 (a window on a city street sees sky only above the roofline across it: F = (1 - sin b)/2, b = 18 deg for a roofline a third of the street width above the window); 0.5 would be an open field. ESTIMATE for a typical urban, mid-height window; a parameter.",
     "Pane warming from vent air is an upper bound.",
     "Evaporation from the pane is instantaneous up to saturation (upper bound on drying).",
     "Retained film cap 100 um; visible threshold 5 um; both unmeasured.",

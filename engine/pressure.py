@@ -29,7 +29,8 @@ THE THREE COMPONENTS
    negative when exhaust exceeds intake. Old facades with leaky operable
    windows cannot be held near the setpoint. Night setback closes the
    outdoor damper and pressurisation falls to about zero. Defaults:
-   +5 Pa occupied (weekdays 07:00 to 19:00), 0 Pa unoccupied. ESTIMATE.
+   +2 Pa occupied (weekdays 07:00 to 19:00; +5 until Oct 25 2026), 0 Pa
+   unoccupied. ESTIMATE.
 
 2. Stack. Indoor air warmer than outdoor is lighter, so indoor pressure
    falls more slowly with height than outdoor pressure. Above the neutral
@@ -55,12 +56,10 @@ THE THREE COMPONENTS
        theta   0     45     90    135    180   degrees off the normal
        Cp     +0.60 +0.25  -0.50  -0.40  -0.30
    Side walls (90 deg) are in suction, not neutral. Wind speed and direction
-   come from the weather file. The NSRDB gives wind at 2 m (since PSM v3);
-   engine.lifetime converts it to a 10 m open-terrain station wind
-   (x 1.253, Oct 25 2026; before that the raw 2 m value was used here). No
-   height or terrain correction for the window itself is applied, which
-   overstates wind on low floors in dense urban settings and understates it
-   high on a tower.
+   come from the weather file. The NSRDB gives wind at 2 m (since PSM v3),
+   used as the wind at the window: for an urban site the standard profiles
+   give 0.85 of it at 35 m and 1.0 near 58 m (engine.lifetime, WIND HEIGHT).
+   Low floors see less, towers and open sites more.
 
 SERIES FLOW
 -----------
@@ -138,7 +137,9 @@ CP_TABLE: tuple[tuple[float, float], ...] = (
 #: assumption, which is the conservative choice for outdoor-air ingress.
 CP_FALLBACK = 0.60
 
-DEFAULT_P_OCCUPIED_PA = 5.0
+# +2 Pa (Oct 25 2026; was +5): the field measurements quoted above, 1 to 2
+# Pa in existing buildings, are the market INOVUES sells into.
+DEFAULT_P_OCCUPIED_PA = 2.0
 DEFAULT_P_UNOCCUPIED_PA = 0.0
 DEFAULT_OCC_START_H = 7
 DEFAULT_OCC_END_H = 19
