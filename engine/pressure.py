@@ -55,9 +55,12 @@ THE THREE COMPONENTS
        theta   0     45     90    135    180   degrees off the normal
        Cp     +0.60 +0.25  -0.50  -0.40  -0.30
    Side walls (90 deg) are in suction, not neutral. Wind speed and direction
-   come from the weather station (10 m, open terrain); no height or terrain
-   correction is applied, which overstates wind on low floors in dense
-   urban settings and understates it high on a tower.
+   come from the weather file. The NSRDB gives wind at 2 m (since PSM v3);
+   engine.lifetime converts it to a 10 m open-terrain station wind
+   (x 1.253, Oct 25 2026; before that the raw 2 m value was used here). No
+   height or terrain correction for the window itself is applied, which
+   overstates wind on low floors in dense urban settings and understates it
+   high on a tower.
 
 SERIES FLOW
 -----------

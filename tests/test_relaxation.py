@@ -38,13 +38,16 @@ def weather():
 
 @pytest.fixture
 def park():
-    """277 Park study setup: VIG, both layers wet-sealed, 70 F / 30 %."""
+    """277 Park study setup: VIG, both layers wet-sealed, 70 F, at 35 % RH.
+    It was 30 % until 2026-10-25; with the sun/sky share and 2 m wind fixes
+    that setup no longer fogs at all, and these tests need a foggy year to
+    compare against (35 %: about 1,600 visible hours in year 2)."""
     u = psychro.u_ip_to_si(0.16)
     r = psychro.r_ip_to_si(0.97)
     return L.LifetimeInputs(
         geometry=CavityGeometry.from_inches(60, 96, 0.6), f_cold=0.014,
         f_warm=f_warm_estimate(0.014, r, u), u_assembly=u,
-        t_room_c=psychro.f_to_c(70), rh_room=0.30, al_out=0.005, al_in=0.005,
+        t_room_c=psychro.f_to_c(70), rh_room=0.35, al_out=0.005, al_in=0.005,
         desiccant_grams=0.0, allow_desorption=False, absorptance=0.1,
         building_floors=50, window_floor=25, facade_azimuth_deg=0.0, max_years=2,
     )

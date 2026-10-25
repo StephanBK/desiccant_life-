@@ -1,8 +1,41 @@
 # HANDOVER — Desiccant Lifetime Simulator (ANLY-003)
 
-Last session: 2026-10-19 (session 9, room humidity mode + stack factor, API v0.2.0). Before that 2026-09-24 (session 8, year-boundary guard, hermetic breathing fix). State: v0.5 (series pressure
-model + single-sided loops) pushed: main on GitHub at 2748f2b + the
-tab-consistency commit after it, Railway serves it.
+Last session: 2026-10-25 (session 10, two physics fixes, API v0.3.0). Before that 2026-10-19 (session 9, room humidity mode + stack factor, API v0.2.0).
+
+## Session 10 (2026-10-25): sun/sky share at the cavity face, 2 m wind
+
+- WHY: Stephan finds des2 too foggy. A lever sweep (NYC fixture) found two
+  plain errors, both of which made the model foggier than its own physics.
+- FIX 1 (engine.cavity.outer_heat_response, outer_surface_f): sun and sky act
+  on the existing window's OUTER surface. The engine added alpha.I/h_out and
+  -q_sky/h_out to the CAVITY face in full and took the sky loss at the
+  cavity-face temperature. Now: dT_face = q . R_rest / (h_out (R_layer +
+  R_rest) + 1), with R_rest = (R_film + R_layer)(1 - f)/f (centre of glass,
+  NFRC film 1/26), and the sky loss at the outer-surface temperature
+  (f_outer = f . R_film / (R_film + R_layer)). New input existing_glass:
+  "single" (R_layer 0.006, default) or "double" (0.212, 1 in IGU). Share of
+  the old value in calm air: single + VIG 0.95, single + SWR 0.77, double +
+  VIG 0.90, double + SWR 0.60. f = 0 reproduces the old formula exactly.
+- FIX 2 (engine.lifetime.WIND_STATION_FACTOR): NSRDB wind is at 2 m since
+  PSM v3; every wind formula (Cp table, pressure, McAdams film) assumed a
+  10 m station wind. Converted: v10 = (10/2)^0.14 x v2 = 1.253 x v2.
+  The legacy engine.moisture.run_year (parity anchor, not used by the API)
+  is unchanged on purpose.
+- EFFECT (NYC fixture, des2 setup, 48 cases: 6 glass pairings x 2 seal
+  sets x 30/35 % RH x north/south, 0 lb): working days with fog 376 -> 120
+  (fix 1 alone 320, fix 2 alone 140; of fix 2, pressure alone 186, surface
+  film alone 303). No case got foggier. With both fixes switched off the
+  new engine matches the old one in all 48 cases.
+- API: existing_glass (echoed; /api/presets lists it with its R). des2 v2.9
+  sends it. The 277 Park app and the Odoo simulator do not send it yet and
+  get "single", which is right for both.
+- Tests: tests/test_outer_surface.py (hand calcs, limits, solver-level
+  checks, wind in the pressure, API).
+- NEXT (not done, Stephan to decide): the f values assume the NFRC exterior
+  film (26 W/m2K) every hour while the engine's own film is 5.7 + 3.8 v;
+  correcting it warms the cavity face by about 0.3 K (VIG) to 1.3 K (SWR) in
+  typical wind. Site inputs: sky view factor (0.5 open field) and building
+  pressure (+5 Pa occupied).
 
 ## Session 9 (2026-10-19): room humidity mode, stack factor (calibration vs CU Boulder)
 

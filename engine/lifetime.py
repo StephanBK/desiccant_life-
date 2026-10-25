@@ -56,12 +56,15 @@ import math
 from dataclasses import dataclass, field
 
 from engine.cavity import (
+    DEFAULT_EXISTING_GLASS,
+    R_EXISTING_LAYER,
     cavity_air_temperature,
     cavity_dry_air_mass,
     cloud_opacity,
     exterior_film_coefficient,
-    radiative_surface_drop,
-    solar_surface_boost,
+    outer_heat_response,
+    outer_surface_f,
+    sky_longwave_loss_w_m2,
     t_from_f,
     vent_cold_surface_rise_two_path,
 )
@@ -142,6 +145,18 @@ WIND_REF_M_S = 4.0
 WIND_EXPONENT = 1.3
 WIND_FLOOR = 0.3
 
+#: Weather wind (2 m above ground) to the 10 m station wind every wind
+#: formula in the engine assumes (Oct 25 2026 fix). The NSRDB reports wind
+#: at 2 m since PSM v3 (NSRDB webinar Q&A, Oct 2020); the pressure model,
+#: the Cp table and the API assumptions were written for 10 m, open
+#: terrain, and the raw 2 m value was being used. Power law, open-terrain
+#: exponent 0.14 (ASHRAE Fundamentals, airflow around buildings):
+#:     v10 = v2 . (10 / 2)^0.14 = 1.253 . v2
+#: Still no height or terrain correction for the window itself. The legacy
+#: bare-ACH scaling (wind_scaled_ach) keeps the file wind: it is a ratio to
+#: its own reference speed, not a physical formula.
+WIND_STATION_FACTOR = (10.0 / 2.0) ** 0.14
+
 
 def wind_scaled_ach(ach_base: float, wind_m_s: float) -> float:
     """ACH through the existing window at this hour's wind speed. Equals
@@ -208,6 +223,10 @@ class LifetimeInputs:
     pane_coupling: bool = True
     absorptance: float = 0.10
     sky_radiation: bool = True
+    # What sits between the existing window's outer surface and its cavity
+    # face (engine.cavity.R_EXISTING_LAYER): "single" or "double" pane. Sets
+    # how much of the sun and sky reaches the cavity face (Oct 25 2026).
+    existing_glass: str = DEFAULT_EXISTING_GLASS
     max_years: int = 20
     substeps: int = 4
     max_film_kg: float = MAX_SURFACE_FILM_KG_PER_M2
@@ -224,6 +243,8 @@ class LifetimeInputs:
     stack_factor: float = 1.0
 
     def __post_init__(self) -> None:
+        if self.existing_glass not in R_EXISTING_LAYER:
+            raise ValueError(f"existing_glass must be one of {sorted(R_EXISTING_LAYER)}, got {self.existing_glass!r}")
         if self.room_humidity not in ROOM_HUMIDITY_MODES:
             raise ValueError(f"room_humidity must be one of {ROOM_HUMIDITY_MODES}, got {self.room_humidity!r}")
         if not 0.0 <= self.people_gkg <= MAX_PEOPLE_GKG:
@@ -276,6 +297,10 @@ class LifetimeInputs:
     @property
     def height_above_npl_m(self) -> float:
         return height_above_npl_m(self.window_floor, self.building_floors, self.floor_height_m)
+
+    @property
+    def r_existing_layer(self) -> float:
+        return R_EXISTING_LAYER[self.existing_glass]
 
     @property
     def desiccant(self) -> DesiccantType:
@@ -490,6 +515,8 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
     pw_per_w_in = slope(w_room)
     ad_out_l: list[float] = []
     ad_in_l: list[float] = []
+    r_layer = inp.r_existing_layer
+    f_outer = outer_surface_f(inp.f_cold, r_layer)
 
     for i in range(n):
         if w_room_h is None:
@@ -500,17 +527,29 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
             slope_in_h = slope(w_r)
         t_o = weather.t_out_c[i]
         rh_o = min(max(weather.rh_out[i], 0.0), 1.0)
-        wind = weather.wind_m_s[i] if has_wind else 2.0
+        # 2 m weather wind -> the 10 m station wind the physical formulas
+        # assume (surface film, facade pressure). The legacy bare-ACH scaling
+        # below is a ratio to its own reference speed of the file's wind and
+        # keeps the raw value, so a given ACH means what it always meant.
+        wind_file = weather.wind_m_s[i] if has_wind else 2.0
+        wind = wind_file * WIND_STATION_FACTOR if has_wind else 2.0
 
         t_cold = t_from_f(inp.f_cold, t_out_c=t_o, t_in_c=inp.t_room_c)
         t_warm = t_from_f(inp.f_warm, t_out_c=t_o, t_in_c=inp.t_room_c)
         if poa_w_m2 is not None or inp.sky_radiation:
+            # Sun and sky act on the existing window's OUTER surface; the
+            # cavity face gets its share through the glass (engine.cavity,
+            # outer_heat_response; before Oct 25 2026 it got all of it).
             h_out = exterior_film_coefficient(wind)
-            if poa_w_m2 is not None and inp.absorptance > 0.0:
-                t_cold += solar_surface_boost(poa_w_m2[i], inp.absorptance, h_out)
+            k_surf, k_face = outer_heat_response(inp.f_cold, r_layer, h_out)
+            t_outer = t_from_f(f_outer, t_out_c=t_o, t_in_c=inp.t_room_c)
+            if poa_w_m2 is not None and inp.absorptance > 0.0 and poa_w_m2[i] > 0.0:
+                q_sun = inp.absorptance * poa_w_m2[i]
+                t_outer += q_sun * k_surf
+                t_cold += q_sun * k_face
             if inp.sky_radiation:
                 op = cloud_opacity(weather.cloud_type[i]) if has_cloud else 0.0
-                t_cold += radiative_surface_drop(t_cold, t_o, h_out, opacity=op)
+                t_cold -= sky_longwave_loss_w_m2(t_outer, t_o, opacity=op) * k_face
 
         if series:
             hf = hour_flow(
@@ -531,7 +570,7 @@ def build_tables(inp: LifetimeInputs, weather, poa_w_m2: list[float] | None) -> 
             a_out = ach_from_air_leakage(inp.al_out, inp.dp_pa + wind_pressure_pa(wind), gap)
             a_in = inp.ach_in
         elif inp.wind_scaling:
-            a_out = wind_scaled_ach(inp.ach_out, wind)
+            a_out = wind_scaled_ach(inp.ach_out, wind_file)
             a_in = inp.ach_in
         else:
             a_out = inp.ach_out

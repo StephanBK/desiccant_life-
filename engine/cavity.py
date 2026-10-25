@@ -21,6 +21,8 @@ Doc ID: ANLY-002 R1.0, Chunk 2
 
 from __future__ import annotations
 
+import math
+
 from engine.psychro import dry_air_density
 
 # ---------------------------------------------------------------------------
@@ -404,8 +406,9 @@ def cavity_volume(gap_m: float = 0.0153) -> float:
 #: Exterior film coefficient at zero wind, W/m2K, and its wind slope.
 #: McAdams' flat-plate correlation, h = 5.7 + 3.8 v. APPROXIMATION: it is a
 #: smooth-surface fit and takes no account of facade turbulence or the height
-#: of the window above grade. NSRDB reports wind speed at 2 m; a curtain wall
-#: forty storeys up sees more.
+#: of the window above grade. NSRDB reports wind speed at 2 m; engine.lifetime
+#: converts it to 10 m open terrain before it gets here (Oct 25 2026). A
+#: curtain wall forty storeys up sees more still.
 H_OUT_STILL_W_M2K = 5.7
 H_OUT_WIND_SLOPE = 3.8
 
@@ -536,7 +539,128 @@ def radiative_surface_drop(
     """
     if h_out_w_m2k <= 0.0:
         raise ValueError(f"h_out must be positive, got {h_out_w_m2k}")
+    q = sky_longwave_loss_w_m2(t_surface_c, t_air_c, emissivity, sky_view_factor, opacity)
+    return -q / h_out_w_m2k
+
+
+def sky_longwave_loss_w_m2(
+    t_surface_c: float,
+    t_air_c: float,
+    emissivity: float = GLASS_EMISSIVITY,
+    sky_view_factor: float = SKY_VIEW_FACTOR_VERTICAL,
+    opacity: float = 0.0,
+) -> float:
+    """Net long-wave loss of an outdoor glass surface to the sky, W/m2
+    (positive = the surface loses heat). The ground half of the view is at
+    air temperature and exchanges nothing net (see radiative_surface_drop).
+
+        q = eps . sigma . F_sky . (T_s^4 - T_sky^4)
+    """
     t_s = t_surface_c + 273.15
     t_sky = sky_temperature_k(t_air_c, opacity)
-    q = emissivity * STEFAN_BOLTZMANN * sky_view_factor * (t_s ** 4 - t_sky ** 4)
-    return -q / h_out_w_m2k
+    return emissivity * STEFAN_BOLTZMANN * sky_view_factor * (t_s ** 4 - t_sky ** 4)
+
+
+# ---------------------------------------------------------------------------
+# From the existing window's outer surface to its cavity face (Oct 25 2026)
+# ---------------------------------------------------------------------------
+#
+# WHAT WAS WRONG
+# Sun and sky act on the OUTER surface of the existing window. Before this
+# fix the engine added alpha.I/h_out and -q_sky/h_out to the CAVITY face in
+# full, and evaluated the sky loss at the cavity-face temperature. That is
+# right only for a pane with no resistance behind it. Two things were
+# missing:
+#   1. Part of a heat flux at the outer surface flows INWARD, toward the
+#      room, instead of all of it being balanced by the outdoor film.
+#   2. Between the outer surface and the cavity face sits the existing glass
+#      itself (6 mm for a single pane; for an existing double pane the
+#      whole insulating unit, gap included). The cavity face moves by only
+#      its share of the outer surface's change.
+# The error was small over a single pane behind a VIG (about 5 % in calm
+# air) and large over an existing double pane or behind a single-pane
+# retrofit (up to about 40 %), and the sky loss of an existing double pane
+# was computed at a surface several kelvin warmer than its real outer face.
+
+#: NFRC 100 winter exterior film, m2K/W (h = 26 W/m2K). The f values from
+#: WINDOW are computed with this film, so it is the film that recovers the
+#: centre-of-glass resistances behind a given f.
+R_OUT_FILM_NFRC = 1.0 / 26.0
+
+#: Resistance from the existing window's OUTER surface to its CAVITY face,
+#: m2K/W, centre of glass:
+#:   single  one 6 mm pane at 1.0 W/mK                          0.006
+#:   double  1 in IGU: 6 mm + 1/2 in air (0.200) + 6 mm         0.212
+#: The same layer values as the des2 estimate for an existing double pane
+#: (des2 shared/scenario.js), whose f came within 0.010 of WINDOW.
+R_EXISTING_LAYER: dict[str, float] = {"single": 0.006, "double": 0.212}
+DEFAULT_EXISTING_GLASS = "single"
+
+
+def outer_surface_f(f_cold: float, r_existing_layer: float) -> float:
+    """Temperature factor of the existing window's OUTER surface.
+
+    Centre of glass the assembly is a series chain, and f at a node is the
+    resistance outboard of it over the total. The cavity face has
+    R_film + R_layer outboard, the outer surface R_film only:
+
+        f_outer = f_cold . R_film / (R_film + R_layer)
+    """
+    if not 0.0 <= f_cold <= 1.0:
+        raise ValueError(f"f_cold must be in [0, 1], got {f_cold}")
+    if r_existing_layer < 0.0:
+        raise ValueError("r_existing_layer cannot be negative")
+    return f_cold * R_OUT_FILM_NFRC / (R_OUT_FILM_NFRC + r_existing_layer)
+
+
+def outer_heat_response(f_cold: float, r_existing_layer: float, h_out_w_m2k: float) -> tuple[float, float]:
+    """Temperature change per W/m2 of heat added at the existing window's
+    OUTER surface: (at the outer surface, at the cavity face), K per W/m2.
+    Multiply by absorbed sun (positive) or by minus the sky loss.
+
+    DERIVATION, centre of glass
+    ---------------------------
+    Chain: outdoor air -[1/h_out]- outer surface S -[R_layer]- cavity face C
+    -[R_rest]- room. R_rest is everything from the cavity face to the room
+    (cavity, retrofit, room film), recovered from f at NFRC conditions:
+
+        f_cold  = (R_film + R_layer) / R_total
+        R_rest  = R_total - R_film - R_layer = (R_film + R_layer)(1 - f_cold) / f_cold
+
+    A flux q into node S leaves through two conductances in parallel, h_out
+    to outdoors and 1 / (R_layer + R_rest) to the room:
+
+        dT_S = q / (h_out + 1 / (R_layer + R_rest))
+        dT_C = dT_S . R_rest / (R_layer + R_rest)
+
+    The old engine used dT_C = q / h_out. Limits: f_cold = 0 (pane pinned
+    to outdoors) gives back exactly q / h_out; f_cold = 1 gives 0.
+
+    WORKED EXAMPLES, calm air (h_out = 5.7)
+      single pane + VIG, f 0.014:  R_rest = 0.0445 x 0.986 / 0.014 = 3.13
+          dT_C / q = 3.13 / (5.7 x 3.136 + 1) = 0.166, old 1 / 5.7 = 0.175  (x 0.95)
+      single pane + SWR, f 0.068:  R_rest = 0.0445 x 0.932 / 0.068 = 0.609
+          dT_C / q = 0.609 / (5.7 x 0.615 + 1) = 0.135                     (x 0.77)
+      double pane + SWR, f 0.301:  R_rest = 0.2505 x 0.699 / 0.301 = 0.582
+          dT_C / q = 0.582 / (5.7 x 0.794 + 1) = 0.105                     (x 0.60)
+
+    Centre-of-glass resistances are used throughout (not 1 / U, which
+    includes the frame), because f, and so the cavity-face temperature the
+    engine condenses on, is centre of glass.
+    """
+    if h_out_w_m2k <= 0.0:
+        raise ValueError(f"h_out must be positive, got {h_out_w_m2k}")
+    if not 0.0 <= f_cold <= 1.0:
+        raise ValueError(f"f_cold must be in [0, 1], got {f_cold}")
+    if r_existing_layer < 0.0:
+        raise ValueError("r_existing_layer cannot be negative")
+    if f_cold <= 0.0:
+        return 1.0 / h_out_w_m2k, 1.0 / h_out_w_m2k
+    if f_cold >= 1.0:
+        g_in = 1.0 / r_existing_layer if r_existing_layer > 0.0 else math.inf
+        return (0.0 if math.isinf(g_in) else 1.0 / (h_out_w_m2k + g_in)), 0.0
+    r_outboard = R_OUT_FILM_NFRC + r_existing_layer
+    r_rest = r_outboard * (1.0 - f_cold) / f_cold
+    r_behind = r_existing_layer + r_rest
+    k_surface = 1.0 / (h_out_w_m2k + 1.0 / r_behind)
+    return k_surface, k_surface * r_rest / r_behind
